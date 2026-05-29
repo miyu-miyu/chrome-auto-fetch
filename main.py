@@ -67,6 +67,11 @@ def load_config(config_path):
         elif sys.platform == "win32":
             config["CLI_PATH"] = "chrome-devtools.exe"
 
+    # 展开 ~ 为 home 目录 (YAML 加载不自动展开)
+    for key in ("OUTPUT_DIR", "LOG_FILE", "USER_DATA_DIR"):
+        if config.get(key):
+            config[key] = os.path.expanduser(config[key])
+
     return config
 
 

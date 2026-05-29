@@ -26,6 +26,7 @@ class ChromeDevTools:
         self._base_args = resolve_connection(config)
         if config.get("CHANNEL", "stable") != "stable":
             self._base_args += ["--channel", config["CHANNEL"]]
+        self._ensure_page()
 
     def _cmd(self, subcmd, extra_args=None):
         args = [self.cli] + self._base_args
@@ -54,15 +55,57 @@ class ChromeDevTools:
             )
         return result
 
+    def _ensure_page(self):
+        try:
+            result = self._run(self._cmd("list-pages"), timeout=5)
+            pages = result.stdout.strip()
+            if not pages or "No pages" in pages:
+                log.info("Chrome 无打开页面, 自动创建空白页")
+                self._run(self._cmd("new-page", ["about:blank"]), timeout=10)
+        except RuntimeError:
+            log.info("Chrome 连接异常或无页面, 尝试创建空白页")
+            try:
+                self._run(self._cmd("new-page", ["about:blank"]), timeout=10)
+            except RuntimeError:
+                log.warning("无法创建空白页, Chrome 可能未启动")
+
+    def _capture_target(self, source=None):
+        """从 list-pages --json 获取 page 0 的 target name, 或从命令输出提取 target。
+
+        navigate 命令不输出 target 信息, 需要通过 list-pages 获取。
+        new-page 命令输出 '(target: HEXID)', 需要用正则提取。
+        """
+        if source:
+            # 匹配 '(target: HEXID)' 或 '[target: name-name]'
+            match = re.search(r'\(target:\s*(\w+)\)|\[target:\s*([A-Za-z0-9_-]+)\]', source)
+            if match:
+                self.target = match.group(1) or match.group(2)
+                log.debug("从命令输出捕获 target: %s", self.target)
+                return True
+
+        # fallback: 通过 list-pages --json 获取 page 0 的 target
+        try:
+            result = self._run(self._cmd("list-pages") + ["--json"], timeout=10)
+            pages = json.loads(result.stdout)
+            if pages and len(pages) > 0:
+                page0 = pages[0]
+                self.target = page0.get("target", "")
+                log.debug("从 list-pages 捕获 target: %s", self.target)
+                return True
+        except (json.JSONDecodeError, RuntimeError) as e:
+            log.debug("list-pages JSON 解析失败: %s", e)
+        return False
+
     def navigate(self, url):
         result = self._run(self._cmd("navigate", [url]), timeout=60)
         output = result.stdout.strip()
-        match = re.search(r'\[target:(\w+-\w+)\]', output)
-        if match:
-            self.target = match.group(1)
+        if self._capture_target(source=output):
             log.info("导航成功: %s → target=%s", url, self.target)
         else:
-            log.warning("未捕获 target name, 使用默认 page 0")
+            if self.target:
+                log.info("导航成功: %s → target=%s (via list-pages)", url, self.target)
+            else:
+                log.warning("导航完成但无法获取 target, 使用默认 page 0")
         return output
 
     def snapshot_json(self):
@@ -135,7 +178,5 @@ class ChromeDevTools:
 
     def new_page(self, url):
         result = self._run(self._cmd("new-page", [url]), timeout=30)
-        match = re.search(r'\[target:(\w+-\w+)\]', result.stdout)
-        if match:
-            self.target = match.group(1)
+        self._capture_target(source=result.stdout)
         return result.stdout.strip()
