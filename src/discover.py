@@ -32,6 +32,12 @@ def discover(cli, config):
     if len(lines) > 50:
         print("\n... 共 %d 行, 已截断显示前50行" % len(lines))
 
+    tree_file = os.path.join(config["OUTPUT_DIR"], "discovery_accessibility_tree.txt")
+    os.makedirs(config["OUTPUT_DIR"], exist_ok=True)
+    with open(tree_file, "w", encoding="utf-8") as f:
+        f.write(tree_text)
+    print("   完整 Accessibility Tree 已保存: %s (%d 行)" % (tree_file, len(lines)))
+
     print("\n2. 可交互元素 (input/select/button/textarea/a):")
     print("-" * 40)
     elements_js = r"""
@@ -120,6 +126,7 @@ def discover(cli, config):
 
     screenshot_path = os.path.join(config["OUTPUT_DIR"], "discovery_screenshot.png")
     os.makedirs(config["OUTPUT_DIR"], exist_ok=True)
+    time.sleep(2)
     cli.screenshot(screenshot_path)
     print("4. 页面截图已保存: %s" % screenshot_path)
     print("   请查看截图确认页面结构\n")
