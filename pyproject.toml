@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "chrome-auto-fetch"
+version = "0.1.0"
+description = "Chrome DevTools 自动化下载框架 — 定时从指定网站自动填入参数、检索、提取下载地址"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.6"
+dependencies = [
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+schedule = [
+    "schedule",
+]
+
+[project.scripts]
+chrome-auto-fetch = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+packages = ["src"]

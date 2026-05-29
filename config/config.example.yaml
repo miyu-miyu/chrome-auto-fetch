@@ -1,0 +1,265 @@
+# chrome-auto-fetch 配置文件
+# =========================
+# 复制此文件为 config.yaml, 然后根据需求填写
+
+# ---- [必填] chrome-devtools 二进制路径 ----
+# macOS Homebrew: /usr/local/bin/chrome-devtools
+# Linux: /usr/local/bin/chrome-devtools
+# Windows: chrome-devtools.exe (需加入 PATH)
+# Cargo 编译: target/release/chrome-devtools
+CLI_PATH: ""
+
+# ---- [必填] 目标网站 URL ----
+# Discovery 模式需要此 URL 导航到目标页面
+TARGET_URL: ""
+
+# ---- [必填] 自定义步骤流程 (STEPS) ----
+# STEPS 是核心配置, 定义自动化流程的步骤序列
+# 每个步骤包含 action (动作类型) 和对应参数
+# 不配 STEPS 时程序报错终止 — 必须填写
+#
+# 支持的 action 类型:
+#   navigate  — 导航到 URL                    参数: url
+#   fill      — 填入输入框/下拉框              参数: params={selector: value} 或 selector+value
+#   click     — 点击元素                       参数: selector, index(1/"last"/N)
+#   click_at  — 坐标点击                       参数: x, y
+#   type_text — 键盘输入文本                   参数: text, submit_key?(Enter等)
+#   press_key — 按键                           参数: key (Escape/Enter/Tab等)
+#   wait      — 等待条件                       参数: strategy, value/selector/expr, timeout
+#   evaluate  — 执行 JS 表达式                 参数: expr, save_to?(变量名)
+#   extract   — 提取下载链接                   参数: strategy(css/js/semantic/auto), selector/expr
+#   loop      — 循环检查直到条件满足            参数: condition, expr/selector/value, max_iterations, interval, on_timeout
+#   branch    — 条件分支跳转                   参数: branches=[{if:JS, then:目标}, {elif:JS, then:目标}, {else:目标}]
+#   screenshot— 截图                           参数: output?(路径)
+#   snapshot  — 获取 Accessibility Tree         参数: format?("text"/"json"), save_to?
+#   new_page  — 打开新 tab                     参数: url
+#   list_pages— 列出所有 tab                   无参数
+#   save      — 保存结果到文件                  无参数
+#
+# wait 的 5 种策略:
+#   text      — 等指定文字出现                  参数: value="搜索结果"
+#   element   — 等 CSS 元素出现                 参数: selector=".download-panel"
+#   url_change— 等 URL 发生变化                无额外参数
+#   js        — 等 JS 表达式返回 truthy         参数: expr="document.querySelectorAll('.result').length > 0"
+#   timeout   — 固定等待 N 毫秒                 参数: timeout=3000
+#
+# branch 的条件跳转 (branches 列表格式):
+#   branches:                    # 条件分支列表
+#     - if: "JS表达式1"          # if: 第一个条件
+#       then: 步号或标签          # if 满足时跳转的目标
+#     - elif: "JS表达式2"        # elif: 更多条件 (可选, 可多项)
+#       then: 步号或标签          # elif 满足时跳转的目标
+#     - else: 步号或标签          # else: 默认跳转 (可选, 值就是目标)
+#   ※ branches 列表格式直观对应 Python 的 if-elif-else 逻辑
+#   ※ 每个条件按顺序评估, 第一个 truthy 的触发跳转, 后续不再判断
+#   ※ then/else 可以使用 1-based 数字步号或步骤的 name 标签
+#   ※ else 的值直接是跳转目标, 不需要 then 关键字
+#   ※ 若省略 else, 所有条件不满足时继续执行下一步
+#   ※ if/elif 表达式支持 ${变量名} 引用之前 save_to 存入的变量
+#   ※ 每个步骤可以添加 name 字段作为标识, 如: name: "login"
+#
+# 每步可配:
+#   on_fail: abort(默认)|skip|retry(N)  — 失败时的处理策略
+#   delay: 浮点秒数                       — 步骤间延迟, 覆盖全局 STEP_DELAY
+#   save_to: 变量名                       — 把结果存入变量, 后续步骤用 ${变量名} 引用
+#   name: 字符串                          — 步骤标签, 用于日志标识和 branch then/else 引用
+#
+# 安全限制:
+#   MAX_STEPS:    STEPS 配置中步骤数量的上限 (默认 100, 硬上限 200)
+#   MAX_EXECUTIONS: 运行时总执行次数的上限 (默认 500, 硬上限 1000, 防止 branch 循环无限跳转)
+#
+# ===== 场景示例 =====
+
+# 示例 1: 弹窗下载 (最常见)
+# STEPS:
+#   - action: navigate
+#     url: "https://download.example.com/search"
+#   - action: fill
+#     params: {"#model": "Mate60", "#version": "4.0"}
+#   - action: click
+#     selector: "#search-btn"
+#   - action: wait
+#     strategy: text
+#     value: "搜索结果"
+#     timeout: 15000
+#   - action: click
+#     selector: ".result-item .link"
+#   - action: wait
+#     strategy: element
+#     selector: ".modal"
+#   - action: extract
+#     strategy: css
+#     selector: ".modal .download-btn"
+#     save_to: "download_urls"
+#   - action: click
+#     selector: ".modal .close-btn"
+#     on_fail: skip
+#   - action: save
+
+# 示例 2: 直接下载 (无弹窗, 点击按钮即触发下载)
+# STEPS:
+#   - action: navigate
+#     url: "https://download.example.com/files"
+#   - action: fill
+#     params:
+#       "#model-input": "Mate60 Pro"
+#   - action: click
+#     selector: "#search-btn"
+#   - action: wait
+#     strategy: element
+#     selector: ".result-list"
+#   - action: click
+#     selector: ".download-btn"
+#   - action: extract
+#     strategy: js
+#     expr: "document.querySelector('.direct-download').href"
+#     save_to: "download_url"
+#   - action: save
+
+# 示例 3: 循环检查进度条
+# STEPS:
+#   - action: navigate
+#     url: "https://example.com/process"
+#   - action: click
+#     selector: "#start-btn"
+#   - action: loop
+#     condition: js
+#     expr: "document.querySelector('.progress').textContent.includes('100%')"
+#     max_iterations: 60
+#     interval: 2000
+#     on_timeout: fail
+#   - action: extract
+#     strategy: css
+#     selector: ".download-link"
+#     save_to: "download_urls"
+#   - action: save
+
+# 示例 4: 页面跳转 (点击后网页跳转到下载页)
+# STEPS:
+#   - action: navigate
+#     url: "https://example.com/portal"
+#   - action: fill
+#     params: {"#username": "admin", "#password": "pass"}
+#   - action: click
+#     selector: "#login-btn"
+#   - action: wait
+#     strategy: url_change
+#     timeout: 10000
+#   - action: click
+#     selector: ".view-detail-btn"
+#   - action: wait
+#     strategy: url_change
+#     timeout: 5000
+#   - action: extract
+#     strategy: js
+#     expr: "document.querySelector('.download-btn').href"
+#     save_to: "download_url"
+#   - action: save
+
+# 示例 5: 条件分支 — 根据搜索结果类型跳转到不同流程
+# STEPS:
+#   - action: navigate
+#     url: "https://example.com/search"
+#     name: "open_search"
+#   - action: fill
+#     params: {"#model": "Mate60"}
+#     name: "fill_params"
+#   - action: click
+#     selector: "#search-btn"
+#     name: "search"
+#   - action: wait
+#     strategy: element
+#     selector: ".result-list"
+#     name: "wait_results"
+#   - action: branch
+#     branches:
+#       - if: "document.querySelector('.modal') !== null"
+#         then: "handle_popup"
+#       - elif: "document.querySelector('.direct-download') !== null"
+#         then: "direct_download"
+#       - else: "save_result"
+#   - action: wait
+#     strategy: element
+#     selector: ".modal .download-btn"
+#     name: "handle_popup"
+#   - action: extract
+#     strategy: css
+#     selector: ".modal .download-btn"
+#     save_to: "download_urls"
+#   - action: click
+#     selector: ".modal .close-btn"
+#     on_fail: skip
+#   - action: extract
+#     strategy: js
+#     expr: "document.querySelector('.direct-download').href"
+#     save_to: "download_urls"
+#     name: "direct_download"
+#   - action: save
+#     name: "save_result"
+
+# 示例 6: 条件分支 + 变量 + name标签
+# STEPS:
+#   - action: navigate
+#     url: "https://example.com/files"
+#     name: "open_files"
+#   - action: extract
+#     strategy: js
+#     expr: "document.querySelector('.file-type').textContent.trim()"
+#     save_to: "file_type"
+#     name: "detect_type"
+#   - action: branch
+#     branches:
+#       - if: "${file_type} === 'PDF'"
+#         then: "pdf_download"
+#       - elif: "${file_type} === 'ZIP'"
+#         then: "zip_download"
+#       - else: "generic_download"
+#   - action: click
+#     selector: ".pdf-download-btn"
+#     name: "pdf_download"
+#   - action: extract
+#     strategy: css
+#     selector: ".pdf-download-btn"
+#     save_to: "download_urls"
+#   - action: click
+#     selector: ".zip-download-btn"
+#     name: "zip_download"
+#   - action: extract
+#     strategy: css
+#     selector: ".zip-download-btn"
+#     save_to: "download_urls"
+#   - action: extract
+#     strategy: auto
+#     name: "generic_download"
+#   - action: save
+#     name: "save_result"
+
+STEPS: []
+
+# ---- Chrome 连接参数 ----
+WS_ENDPOINT: ""
+
+# Chrome 用户数据目录 (独立 profile, 与日常 Chrome 不冲突)
+USER_DATA_DIR: "~/chrome-debug-profile"
+
+# Chrome 通道: stable / beta / canary / dev
+CHANNEL: "stable"
+
+# ---- [可选] 输出文件目录 ----
+OUTPUT_DIR: "~/chrome-devtools-downloads"
+
+# ---- [可选] 日志文件路径 ----
+LOG_FILE: "~/chrome-devtools-downloads/auto_download.log"
+
+# ---- [可选] 重试次数 ----
+MAX_RETRIES: 3
+
+# ---- [可选] 步骤间等待时间 (秒) ----
+STEP_DELAY: 2
+
+# ---- [可选] 步骤数量安全限制 ----
+MAX_STEPS: 100
+MAX_EXECUTIONS: 500
+
+# ---- [可选] 定时执行时间 (24h 格式) ----
+SCHEDULE_TIME: "09:00"

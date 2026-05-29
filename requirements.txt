@@ -1,0 +1,2 @@
+pyyaml>=5.1
+schedule>=1.1.0  # optional: needed for daemon mode only
