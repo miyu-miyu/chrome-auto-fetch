@@ -78,13 +78,28 @@ chrome-auto-fetch 需要: Python 3.6+, Rust 工具链 (编译 chrome-devtools-cl
 
 ## 3. 快速开始
 
-环境就绪后, 3 步即可运行:
+环境就绪后, 4 步即可运行:
 
 ```bash
-cp config/config.example.yaml config/config.yaml   # 创建配置
-python3 main.py --mode discover                     # 探索页面结构
-python3 main.py --mode auto                         # 执行自动化流程
+# 步骤 1: 启动 Debug Chrome (每次重启电脑后需要重新执行)
+# macOS:
+bash scripts/start-chrome-debug.sh
+# Linux:
+bash scripts/start-chrome-debug-linux.sh
+# Windows:
+scripts\start-chrome-debug.bat
+
+# 步骤 2: 创建配置
+cp config/config.example.yaml config/config.yaml
+
+# 步骤 3: 探索页面结构 (获取 CSS 选择器, 编写 STEPS)
+python3 main.py --mode discover
+
+# 步骤 4: 执行自动化流程
+python3 main.py --mode auto
 ```
+
+> **重要**: 步骤 1 是必须的前置操作。Debug Chrome 需要以 `--remote-debugging-port=9333` 参数启动, 才能让工具通过 CDP 控制浏览器。普通启动的 Chrome 无法连接。启动脚本有幂等检查 — 如果 Debug Chrome 已在运行则跳过, 不会重复启动。
 
 配置字段详解见 [第 4 章](#4-配置项目), 运行模式详解见 [第 5 章](#5-使用方式)。
 
