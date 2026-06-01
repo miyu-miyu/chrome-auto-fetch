@@ -76,7 +76,7 @@ chrome-auto-fetch 需要: Python 3.6+, Rust 工具链 (编译 chrome-devtools-cl
 
 ---
 
-## 3. 快速开始
+## 3. 快速开始⭐️
 
 环境就绪后, 4 步即可运行:
 
@@ -94,6 +94,8 @@ cp config/config.example.yaml config/config.yaml
 
 # 步骤 3: 探索页面结构 (获取 CSS 选择器, 编写 STEPS)
 python3 main.py --mode discover
+# 或手动指定网址:
+python3 main.py --mode discover --url "https://example.com/search"
 
 # 步骤 4: 执行自动化流程
 python3 main.py --mode auto
@@ -153,26 +155,45 @@ STEPS 配置详见 [第 6 章](#6-自定义步骤流程-steps)。
 首次使用某个网站时，你并不知道页面元素对应的 CSS 选择器是什么。Discovery 模式帮你解决这个问题:
 
 ```bash
+# 使用 config.yaml 中的 TARGET_URL
 python3 main.py --mode discover
+
+# 手动指定网址 (不依赖 config.yaml 的 TARGET_URL)
+python3 main.py --mode discover --url "https://gitcode.com/search?q=OpenHarmony&type=repo"
 ```
 
-运行后，工具会:
+`--url` 参数适合以下场景:
+- 临时探索某个页面，不想修改 config.yaml
+- 已经在 config.yaml 中配了首页 URL，但想探索搜索结果页等子页面
+- 同一个网站需要多次 discover 不同页面
 
-1. 导航到目标网站 (`TARGET_URL`)
-2. 输出页面的 Accessibility Tree (前 50 行)
-3. 输出所有可交互元素列表 (input、select、button、textarea、a 标签)
-4. 每个元素显示: tag、CSS selector、id、name、type、text
-5. 保存页面截图到输出目录
+运行后，工具会依次输出 5 个部分:
+
+1. **Accessibility Tree** — 页面的无障碍树结构 (前 50 行预览，完整内容保存到文件)
+2. **可交互元素** — 所有 input、select、button、textarea、a 标签，每个元素显示: tag、CSS selector 候选列表 (★ 唯一 / ○ 非唯一)、id、name、type、text、href、aria-label
+3. **映射表** — Accessibility Tree 节点与 DOM 元素的对应关系，每个节点列出 ★/○ 标记的选择器候选列表和唯一性验证结果
+4. **STEPS 建议** — 根据映射结果自动生成关键元素的 STEPS 配置提示
+5. **页面截图** — 保存页面截图用于确认结构
+
+所有输出同时**保存到本地文件**（`OUTPUT_DIR` 目录下），方便离线查阅:
+
+| 文件 | 内容 | 格式 |
+|---|---|---|
+| `discovery_accessibility_tree.txt` | 完整 Accessibility Tree (无截断) | 文本 |
+| `discovery_elements.json` | 所有可交互 DOM 元素数据 (含 selector_candidates) | JSON |
+| `discovery_mapping.json` | Accessibility→DOM 映射数据 | JSON |
+| `discovery_mapping_table.txt` | 映射表可读版本 (★/○ 唯一性标记) | 文本 |
+| `discovery_screenshot.png` | 页面截图 | 图片 |
 
 根据输出，你可以找到输入框、搜索按钮、结果链接的 CSS 选择器，填入 STEPS 步骤序列中。
 
 **使用流程:**
 
 ```
-1. 在 config.yaml 中填写 TARGET_URL 和 CLI_PATH
-2. 运行 python3 main.py --mode discover
-3. 查看输出中的可交互元素列表
-4. 根据输出编写 STEPS 步骤序列 (详见第 6 章)
+1. 在 config.yaml 中填写 CLI_PATH (TARGET_URL 可留空, 用 --url 替代)
+2. 运行 python3 main.py --mode discover [--url "目标网址"]
+3. 查看 OUTPUT_DIR 下的输出文件 (或直接看终端输出)
+4. 根据映射表和选择器候选列表编写 STEPS 步骤序列 (详见第 6 章)
 5. 运行 python3 main.py --mode auto 开始下载
 ```
 
@@ -355,8 +376,8 @@ STEPS:
 | Action | 说明 | 主要参数 |
 |---|---|---|
 | `navigate` | 导航到 URL | `url` |
-| `fill` | 填入输入框/下拉框 | `params: {selector: value}` 或 `selector + value` |
-| `click` | 点击元素 | `selector`, `index: 1/"last"/N` (选第几个) |
+| `fill` | 填入输入框/下拉框 | `params: {selector: value}` 或 `selector + value`, 或 `match + value + fill_value` |
+| `click` | 点击元素 | `selector`, `index: 1/"last"/N`, 或 `match + value` (详见第 7 章) |
 | `click_at` | 按坐标点击 | `x, y` |
 | `type_text` | 键盘输入文本 | `text`, `submit_key?: str` (Enter 等) |
 | `press_key` | 按键 | `key` (Escape, Enter, Tab...) |
@@ -371,58 +392,26 @@ STEPS:
 | `list_pages` | 列出所有 tab | — |
 | `save` | 保存结果到文件 | — |
 
-### 6.5 Wait 的 5 种策略
+每种 Action 的详细参数说明、用法示例和注意事项, 请参见 **[Action 类型详解](docs/actions.md)**。
 
-| Strategy | 说明 | 参数 |
+### 6.5 通用参数
+
+以下参数适用于所有 action 类型:
+
+| 参数 | 类型 | 说明 |
 |---|---|---|
-| `text` | 等指定文字出现 | `value: "搜索结果"` |
-| `element` | 等 CSS 元素出现在 DOM 中 | `selector: ".download-panel"` |
-| `url_change` | 等 URL 发生变化 (页面跳转) | `timeout` |
-| `js` | 等 JS 表达式返回 truthy 值 | `expr: "document.querySelectorAll('.result').length > 0"` |
-| `timeout` | 固定等待 N 毫秒 | `timeout: 3000` |
+| `name` | string | 步骤标签, 用于日志标识 (`Step 1/label: action`) 和 branch 跳转引用 |
+| `delay` | number | 步骤执行后的等待秒数。默认取决于 action 类型 (大部分使用 `STEP_DELAY` 2s) |
+| `on_fail` | string | 步骤失败时的处理策略: `abort` (终止流程, 默认), `skip` (跳过继续), `retry(N)` (重试 N 次, 当前版本等同 abort) |
+| `${变量名}` | — | 所有 string 参数均支持变量引用, 在执行前被替换为实际值 |
 
-所有 wait 策略都支持 `timeout` 参数 (毫秒)，超时后步骤失败。
+`name` 让步骤日志更可读, 同时允许 `branch` 的 `then`/`else` 使用标签名代替数字步号, 维护更方便。
 
-### 6.6 Loop 循环检查
+`delay` 覆盖全局 `STEP_DELAY`, 只影响当前步骤。适合在需要更长等待的步骤后使用 (如页面加载慢时增大 navigate 后的 delay)。
 
-适用于需要等待某个异步过程完成的场景 (如进度条、文件生成、异步下载):
+`on_fail` 提供步骤级容错, 适用于可能失败但不应该终止整个流程的步骤 (如关弹窗按钮可能不存在)。完整的 on_fail 说明见 [Action 类型详解](docs/actions.md) "附录: 通用参数" 部分。
 
-```yaml
-- action: loop
-  condition: js
-  expr: "document.querySelector('.progress').textContent.includes('100%')"
-  max_iterations: 60
-  interval: 2000
-  on_timeout: fail
-```
-
-| 参数 | 说明 | 默认值 |
-|---|---|---|
-| `condition` | 检查类型: `js` / `element_exists` / `text_exists` | `js` |
-| `expr` | JS 条件表达式 (condition=js 时) | — |
-| `selector` | CSS 选择器 (condition=element_exists 时) | — |
-| `value` | 文本内容 (condition=text_exists 时) | — |
-| `max_iterations` | 最多循环次数 | 30 |
-| `interval` | 每次检查间隔 (毫秒) | 2000 |
-| `on_timeout` | 超时后行为: `fail` / `continue` / `extract_and_continue` | `fail` |
-
-### 6.7 步骤级错误处理
-
-每个步骤可以配置 `on_fail` 策略:
-
-```yaml
-- action: click
-  selector: ".maybe-not-exist-btn"
-  on_fail: skip
-```
-
-| on_fail | 行为 |
-|---|---|
-| `abort` | 整体流程终止 (默认) |
-| `skip` | 跳过此步，继续下一步 |
-| `retry(N)` | 重试 N 次 (当前版本等同 abort) |
-
-### 6.8 变量提取与跨步骤传递
+### 6.6 变量提取与跨步骤传递
 
 `evaluate` 和 `extract` 步骤支持 `save_to`，将结果存入变量。后续步骤用 `${变量名}` 引用:
 
@@ -440,365 +429,229 @@ STEPS:
 
 变量在整个步骤流程中持久存在，任何步骤的 `save_to` 写入的变量都可以被后续步骤引用。
 
-### 6.9 典型场景配置示例
+变量与条件分支 (`branch`) 配合使用的示例见 [Action 类型详解: branch](docs/actions.md#branch)。
 
-#### 场景 A: 直接下载 (无弹窗)
-
-点击下载按钮后直接触发下载，不需要弹窗:
-
-```yaml
-STEPS:
-  - action: navigate
-    url: "https://download.example.com/files"
-  - action: fill
-    params: {"#search": "Mate60"}
-  - action: click
-    selector: "#search-btn"
-  - action: wait
-    strategy: element
-    selector: ".result-list"
-  - action: click
-    selector: ".download-btn"
-  - action: extract
-    strategy: js
-    expr: "document.querySelector('.direct-download').href"
-    save_to: "download_url"
-  - action: save
-```
-
-#### 场景 B: 弹窗场景
-
-```yaml
-STEPS:
-  - action: navigate
-    url: "https://download.example.com/search"
-  - action: fill
-    params: {"#model": "Mate60", "#version": "4.0"}
-  - action: click
-    selector: "#search-btn"
-  - action: wait
-    strategy: text
-    value: "搜索结果"
-    timeout: 15000
-  - action: click
-    selector: ".result-item .link"
-    index: 1
-  - action: wait
-    strategy: element
-    selector: ".modal"
-  - action: extract
-    strategy: css
-    selector: ".modal .download-btn"
-    save_to: "download_urls"
-  - action: click
-    selector: ".modal .close-btn"
-    on_fail: skip
-  - action: save
-```
-
-#### 场景 C: 循环检查进度条
-
-启动任务后循环检查直到进度完成:
-
-```yaml
-STEPS:
-  - action: navigate
-    url: "https://example.com/process"
-  - action: click
-    selector: "#start-btn"
-  - action: loop
-    condition: js
-    expr: "document.querySelector('.progress').textContent.includes('100%')"
-    max_iterations: 60
-    interval: 2000
-    on_timeout: fail
-  - action: extract
-    strategy: css
-    selector: ".download-link"
-    save_to: "download_urls"
-  - action: save
-```
-
-#### 场景 D: 页面跳转 (点击后跳到下载页)
-
-点击后网页跳转，在新页面提取下载链接:
-
-```yaml
-STEPS:
-  - action: navigate
-    url: "https://example.com/portal"
-  - action: fill
-    params: {"#username": "admin", "#password": "pass"}
-  - action: click
-    selector: "#login-btn"
-  - action: wait
-    strategy: url_change
-    timeout: 10000
-  - action: click
-    selector: ".view-detail-btn"
-  - action: wait
-    strategy: url_change
-    timeout: 5000
-  - action: extract
-    strategy: js
-    expr: "document.querySelector('.download-btn').href"
-    save_to: "download_url"
-  - action: save
-```
-
-#### 场景 E: 纯 STEPS 配置
-
-只使用 STEPS 的完整配置示例:
-
-```yaml
-CLI_PATH: "/usr/local/bin/chrome-devtools"
-WS_ENDPOINT: ""
-OUTPUT_DIR: "~/chrome-devtools-downloads"
-STEP_DELAY: 2
-MAX_RETRIES: 3
-
-STEPS:
-  - action: navigate
-    url: "https://example.com"
-  - action: click
-    selector: "#download-section"
-  - action: wait
-    strategy: element
-    selector: "#file-list"
-  - action: click
-    selector: "#file-list .file-item:last-child .view-btn"
-    index: "last"
-  - action: wait
-    strategy: element
-    selector: ".detail-download-btn"
-  - action: extract
-    strategy: css
-    selector: ".detail-download-btn"
-    save_to: "download_urls"
-  - action: save
-```
-
-#### 场景 F: 条件分支 — 根据页面状态跳转
-
-点击搜索后, 根据页面状态决定走不同流程:
-
-```yaml
-STEPS:
-  - action: navigate                              # Step 1
-    url: "https://example.com/search"
-    name: "open_search"
-  - action: fill                                  # Step 2
-    params: {"#model": "Mate60"}
-    name: "fill_params"
-  - action: click                                 # Step 3
-    selector: "#search-btn"
-    name: "search"
-  - action: wait                                  # Step 4
-    strategy: element
-    selector: ".result-list"
-    name: "wait_results"
-  - action: branch                                # Step 5: if-elif-else
-    branches:
-      - if: "document.querySelector('.modal') !== null"
-        then: "handle_popup"
-      - elif: "document.querySelector('.direct-download') !== null"
-        then: "direct_download"
-      - else: "save_result"
-  - action: wait                                  # Step 6
-    strategy: element
-    selector: ".modal .download-btn"
-    name: "handle_popup"
-  - action: extract                               # Step 7
-    strategy: css
-    selector: ".modal .download-btn"
-    save_to: "download_urls"
-  - action: click                                 # Step 8
-    selector: ".modal .close-btn"
-    on_fail: skip
-  - action: extract                               # Step 9
-    strategy: js
-    expr: "document.querySelector('.direct-download').href"
-    save_to: "download_urls"
-    name: "direct_download"
-  - action: save                                  # Step 10
-    name: "save_result"
-```
-
-#### 场景 G: 条件分支 + 变量 — 根据提取到的值决定后续流程
-
-先提取文件类型变量, 再根据变量值跳转到不同的下载流程:
-
-```yaml
-STEPS:
-  - action: navigate                              # Step 1
-    url: "https://example.com/files"
-    name: "open_files"
-  - action: extract                               # Step 2: 提取文件类型
-    strategy: js
-    expr: "document.querySelector('.file-type').textContent.trim()"
-    save_to: "file_type"
-    name: "detect_type"
-  - action: branch                                # Step 3: if-elif-else
-    branches:
-      - if: "${file_type} === 'PDF'"
-        then: "pdf_download"
-      - elif: "${file_type} === 'ZIP'"
-        then: "zip_download"
-      - else: "generic_download"
-  - action: click                                 # Step 4: PDF
-    selector: ".pdf-download-btn"
-    name: "pdf_download"
-  - action: extract                               # Step 5
-    strategy: css
-    selector: ".pdf-download-btn"
-    save_to: "download_urls"
-  - action: click                                 # Step 6: ZIP
-    selector: ".zip-download-btn"
-    name: "zip_download"
-  - action: extract                               # Step 7
-    strategy: css
-    selector: ".zip-download-btn"
-    save_to: "download_urls"
-  - action: extract                               # Step 8: 通用
-    strategy: auto
-    name: "generic_download"
-  - action: save                                  # Step 9
-    name: "save_result"
-```
-
-### 6.10 Branch 条件分支跳转
-
-`branch` 动作提供 if-elif-else 条件跳转能力，让你根据页面状态或变量值决定后续执行哪一步。
-
-#### 基本语法
-
-```yaml
-- action: branch
-  branches:                       # 条件分支列表
-    - if: "JS表达式1"             # if: 第一个条件
-      then: 步号或标签             # if 满足时跳转的目标
-    - elif: "JS表达式2"           # elif: 更多条件 (可选, 可多项)
-      then: 步号或标签             # elif 满足时跳转的目标
-    - else: 步号或标签             # else: 默认跳转 (可选, 值就是目标)
-```
-
-关键字对应 Python 的 if-elif-else: `branches` 列表中, `if` 是第一个条件, `elif` 是后续条件, `else` 是兜底跳转。`else` 的值直接是跳转目标, 不需要 `then` 关键字。
-
-#### 工作原理
-
-1. `branches` 列表按顺序评估每个条件
-2. `if` 条件最先评估 (相当于 Python 的 if)
-3. 若 `if` 为 truthy, 跳转到其 `then` 指定的步骤, 后续 `elif` 和 `else` 不再判断
-4. 若 `if` 为 falsy, 依次评估 `elif` 条件 (相当于 elif)
-5. 第一个 truthy 的 `elif` 条件触发跳转到其 `then` 步骤
-6. 所有条件都不满足:
-   - 有 `else` 项: 跳转到 `else` 值指定的步骤
-   - 无 `else` 项: 继续执行下一个步骤 (正常顺序)
-7. `then`/`else` 的目标可以使用数字步号 (1-based) 或步骤的 `name` 标签
-
-#### 变量支持
-
-`if`/`elif` 表达式支持 `${变量名}` 引用之前 `save_to` 存入的变量:
-
-```yaml
-- action: branch
-  branches:
-    - if: "${file_type} === 'PDF'"
-      then: "pdf_download"
-    - elif: "${file_type} === 'ZIP'"
-      then: "zip_download"
-    - else: "generic_download"
-```
-
-`${file_type}` 在执行前会被替换为变量的实际值 (如 `"PDF"`), 最终执行的 JS 表达式变为 `"PDF" === 'PDF'`, 返回 `true` 触发跳转。
-
-#### 步骤标签 (name)
-
-每个步骤可以添加 `name` 字段作为人类可读的标识符:
-
-```yaml
-- action: navigate
-  url: "https://example.com/search"
-  name: "open_search"
-```
-
-`name` 有两个用途:
-
-1. **日志标识**: 执行日志会显示步骤标签, 如 `Step 1/open_search: navigate`, 更容易定位问题
-2. **branch then/else 引用**: `then` 和 `else` 可以使用 `name` 值代替数字步号, 让配置更可读:
-
-```yaml
-- action: branch
-  branches:
-    - if: "document.querySelector('.modal') !== null"
-      then: "handle_popup"    # 引用 name="handle_popup" 的步骤
-    - else: "save_result"     # 引用 name="save_result" 的步骤
-```
-
-使用 `name` 引用时, 即使步骤顺序调整也不需要修改 then/else 值 — 更容易维护。
-
-`name` 是可选的。没有 `name` 的步骤在日志中只显示数字编号, branch then/else 只能使用数字步号。
-
-#### 参数说明
-
-| 参数 | 说明 | 类型 | 必填 |
-|---|---|---|---|
-| `branches` | 条件分支列表, 每项含 if/elif/else 关键字 | list | 是 |
-| `branches[].if` | 第一个条件表达式 (Python if) | string (JS) | 第一个必须有 |
-| `branches[].elif` | 后续条件表达式 (Python elif) | string (JS) | 否 |
-| `branches[].then` | if/elif 满足时跳转的目标步号或标签 | int/string | if/elif 项必须有 |
-| `branches[].else` | 默认跳转目标 (Python else, 值即目标) | int/string | 否 |
-
-#### 注意事项
-
-- **步号/标签范围**: `then`/`else` 使用数字时必须在 1 ~ STEPS 总数范围内; 使用 name 标签时必须存在对应的步骤
-- **branch 不触发 on_fail**: branch 总是返回 success=True, 无匹配条件是预期行为
-- **步号对照**: 建议用 `name` 标签标注步骤, `then`/`else` 引用标签比数字步号更易维护
-
-### 6.11 步骤数量安全限制
+### 6.7 步骤数量安全限制
 
 为了防止配置过长或 branch 条件跳转导致的无限循环, 引入两个安全限制:
 
-#### MAX_STEPS (配置级限制)
+| 限制 | 作用 | 默认值 | 硬上限 |
+|---|---|---|---|
+| `MAX_STEPS` | 限制 STEPS 配置中定义的步骤数量上限 | 100 | 200 |
+| `MAX_EXECUTIONS` | 限制运行时总执行次数 (含 branch 跳转的回溯) | 500 | 1000 |
 
-限制 STEPS 配置中定义的步骤数量上限。
+`MAX_STEPS` 在步骤引擎启动时检测, 超限立即终止。`MAX_EXECUTIONS` 在每次步骤执行后计数, 超限时终止并保存已有部分结果。
 
-| 项目 | 值 |
-|---|---|
-| 默认值 | 100 |
-| 硬上限 | 200 (即使配置超过 200, 也会被自动 clamp) |
-| 检查时机 | 步骤引擎启动时 |
-| 超限行为 | 立即终止, 状态为 `failed`, 错误信息包含实际步数和上限值 |
-
-#### MAX_EXECUTIONS (运行时限制)
-
-限制步骤引擎运行时总执行次数 (包含重复执行, 如 branch 跳转导致的回溯)。
-
-| 项目 | 值 |
-|---|---|
-| 默认值 | 500 |
-| 硬上限 | 1000 |
-| 检查时机 | 每次步骤执行后 |
-| 超限行为 | 终止执行, 状态为 `failed`, 保存已有部分结果 |
-
-#### 为什么需要这两个限制?
-
-- **MAX_STEPS**: 防止用户定义过长的步骤序列 (比如 500 步), 导致配置难以维护和调试
-- **MAX_EXECUTIONS**: 防止 branch 条件跳转导致的无限循环。例如: Step 3 branch → goto 2, Step 2 branch → goto 3, 形成循环。每次步骤执行都会计数, 超过上限后自动终止并保存已有结果
-
-#### 配置示例
+配置示例:
 
 ```yaml
-# 如果你的流程超过 100 步, 可以调大 MAX_STEPS (但不超过 200)
+# 如果流程超过 100 步, 可调大 MAX_STEPS (但不超过 200)
 MAX_STEPS: 150
-
-# 如果你的 branch 流程需要较多重复执行, 可以调大 MAX_EXECUTIONS (但不超过 1000)
+# 如果 branch 流程需要较多重复执行, 可调大 MAX_EXECUTIONS (但不超过 1000)
 MAX_EXECUTIONS: 800
 ```
 
+各 Action 的完整参数表、进阶用法和注意事项，请参见 **[Action 类型详解文档](docs/actions.md)**。
+
 ---
 
-## 7. 项目结构
+## 7. 元素定位方式 ⭐️
+
+chrome-auto-fetch 通过「选择器」定位页面上的元素 (输入框、按钮、链接等)。Discovery 模式会为每个元素生成多个候选选择器, 你需要从中挑选一个唯一的、稳定的写进 STEPS 配置。
+
+目前支持 **2 种定位方式**, 可以根据场景灵活选用:
+
+### 7.1 方式一: CSS 选择器 (`selector`)
+
+最常见的定位方式, 使用标准 CSS 选择器语法直接匹配 DOM 元素。
+
+```yaml
+- action: click
+  selector: "#search-btn"
+
+- action: fill
+  params:
+    "#golbalSearch": "OpenHarmony"
+```
+
+Discovery 模式会为每个元素生成多种 CSS 选择器候选, 按唯一性优先级排序:
+
+| 优先级 | 选择器类型 | 示例 | 唯一性 |
+|---|---|---|---|
+| 1 | ID 选择器 | `#golbalSearch` | 100% 唯一 |
+| 2 | 属性选择器 (href) | `a[href="/openharmony"]` | 链接通常唯一 |
+| 3 | 属性选择器 (aria-label) | `[aria-label="搜索"]` | 通常唯一 |
+| 4 | 属性选择器 (name) | `input[name="query"]` | 通常唯一 |
+| 5 | 属性选择器 (placeholder) | `input[placeholder="搜索项目"]` | 通常唯一 |
+| 6 | 组合 class 选择器 | `button.search-btn.primary` | 可能唯一 |
+| 7 | 单 class 选择器 | `a.g-link` | 可能非唯一 |
+| 8 | nth-child 路径 | `div > button:nth-of-type(2)` | 兜底 |
+
+Discovery 输出中使用 ★ 标记已验证唯一的选择器, ○ 标记非唯一选择器:
+
+```
+[link] 鸿蒙开发工具广场/OpenHarmony字节码分析工具
+  ★ a[href="https://gitcode.com/openharmony"]   (唯一 ✓)     ← 优先用这个
+  ○ a.search-harmony-card-title                  (匹配3个)
+  ○ a.g-link                                     (匹配4个)
+```
+
+**适用场景**: 大多数情况, 特别是目标元素有唯一 id 或 href 时。
+
+**注意事项**:
+- CSS 选择器无法按「可见文本内容」匹配 (CSS 没有 `:text()` 伪类)
+- 页面结构变化时, nth-child 路径和 class 选择器可能失效
+- 属性选择器中的值使用 HTML 原始属性值 (相对 href 而非绝对 URL)
+
+### 7.2 方式二: 属性匹配 (`match`)
+
+用 `match` 参数定位元素。`text` 是 `match` 的一种类型, 与 href、aria-label、name、placeholder 统属同一体系, 使用相同的 `match` + `value` 语法, 只是底层实现不同 — 属性类型转为 CSS 属性选择器, text 类型转为 JS 动态搜索。
+
+与方式一相比, `match` 不需要写选择器层级路径 (如 `div > button:nth-of-type(2)`), 只关注属性值本身, 更**稳定抗页面结构变化。**
+
+#### 7.2.1 属性类型匹配 — href / aria-label / name / placeholder
+
+属性类型匹配将 match 参数转为 CSS 属性选择器, chrome CLI 的 click/fill 操作可直接使用, 无需额外 JS 评估:
+
+```yaml
+# 按 href 精确匹配链接
+- action: click
+  match: href
+  value: "https://gitcode.com/openharmony"
+
+# 按 href 部分匹配 (更灵活, 不需要写完整 URL)
+- action: click
+  match: href
+  value: "openharmony"
+  match_mode: contains
+
+# 按 aria-label 匹配搜索按钮
+- action: click
+  match: aria_label
+  value: "搜索"
+
+# 按 name 属性匹配输入框
+- action: fill
+  match: name
+  value: "query"
+  fill_value: "OpenHarmony"
+
+# 按 placeholder 匹配输入框
+- action: fill
+  match: placeholder
+  value: "搜索项目"
+  fill_value: "OpenHarmony"
+```
+
+**适用场景**:
+- 同类元素很多 (如搜索结果列表中的多个链接), 用 href 精确定位特定一个
+- 页面结构经常变化 (class 名、层级可能改动), 用不变的属性值定位更稳定
+- 需要按属性值而非 CSS 选择器路径定位的场景
+
+#### 7.2.2 文本匹配 (`match: text`) ⭐️
+
+文本匹配是 `match` 的一种类型, 用于定位没有独特属性、只能通过可见文字区分的元素。CSS 选择器无法按文本内容匹配 (没有 `:text()` 伪类), `match: text` 通过 JS 在页面上动态遍历搜索来弥补这一能力缺口。
+
+它与 href/aria-label/name/placeholder 一样属于 match 参数体系, 只是底层实现不同, 使用方式完全一致。
+
+```yaml
+# 点击"登录"按钮
+- action: click
+  match: text
+  value: "登录"
+
+# 点击包含"OpenHarmony"文字的链接
+- action: click
+  match: text
+  value: "OpenHarmony"
+
+# 点击文本完全等于"搜索"的元素 (严格模式)
+- action: click
+  match: text
+  value: "搜索"
+  match_mode: exact
+
+# 填入文本为"搜索项目"的输入框
+- action: fill
+  match: text
+  value: "搜索项目"
+  fill_value: "OpenHarmony"
+```
+
+**`match_mode` 对文本匹配的影响**:
+
+- 默认 (`contains`): **匹配第一个 `.includes(value)` 为 true 的元素**, 即文本**包含**指定字符串即可命中
+- `exact`: 匹配 `.textContent.trim() === value` 的元素, 即文本必须**完全等于**指定字符串才命中
+
+**缩小搜索范围 — `tag` 参数**:
+
+当多个元素包含相同文本时, 默认匹配第一个。可通过 `tag` 参数限定搜索范围, 只在指定标签中查找:
+
+```yaml
+# 只在 <a> 标签中搜索文本 (缩小范围)
+- action: click
+  match: text
+  value: "OpenHarmony"
+  tag: "a"
+
+# 只在 <button> 标签中搜索文本
+- action: click
+  match: text
+  value: "登录"
+  tag: "button"
+```
+
+**适用场景**:
+- 普通按钮 (如 "登录"、"注册"、"搜索")
+- 菜单项、导航链接等纯文本元素
+- 无 id、无 name、无独特 class 的场景, 只能通过文字区分元素
+- 同页面多个元素包含相同文字时, 配合 `tag` 限定搜索范围
+
+**注意事项**:
+- 文本匹配通过 JS 在页面上遍历元素执行, 比纯 CSS 选择器稍慢
+- `.includes()` 模式可能误匹配 (如搜索 "搜索" 可能同时匹配 "高级搜索" 按钮)
+- 多个元素文本完全相同时, 默认匹配第一个; 如需精确区分, 优先用 `match: href` 或组合 `tag` 参数
+
+#### 7.2.3 match 参数通用规则
+
+支持的 `match` 类型:
+
+| match 值 | 说明 | 底层实现 |
+|---|---|---|
+| `href` | 链接目标地址 | 转为 CSS 属性选择器: `a[href='...']` |
+| `aria_label` (或 `aria-label`) | 无障碍标签 | 转为 CSS 属性选择器: `[aria-label='...']` |
+| `name` | 表单元素 name 属性 | 转为 CSS 属性选择器: `[name='...']` |
+| `placeholder` | 输入框占位文本 | 转为 CSS 属性选择器: `[placeholder='...']` |
+| `text` | 元素可见文本内容 | JS 动态遍历搜索 (CSS 无法按文本匹配) |
+
+`match_mode` 参数控制匹配精度, 对所有 match 类型均有效:
+
+| match_mode | 说明 | 对属性类型的效果 | 对 text 的效果 |
+|---|---|---|---|
+| `exact` (默认) | 值完全匹配 | `a[href='完整值']` | `.textContent.trim() === '值'` |
+| `contains` | 值包含指定字符串 | `a[href*='部分值']` | `.textContent.includes('值')` |
+
+通用规则:
+- `match` 和 `selector` 同时存在时, `match` 优先 (selector 被忽略)
+- `fill` 使用 `match` 时, `value` 是匹配搜索值, `fill_value` 是实际填入值; 不指定 `fill_value` 时用 `value` 兜底
+- `match: href` 的 `value` 使用 HTML 原始 href 属性值 (可能是相对路径如 `/openharmony`, 而非浏览器解析后的绝对 URL)
+
+### 7.3 两种方式选择指南
+
+| 场景 | 推荐方式 | 示例 |
+|---|---|---|
+| 元素有唯一 id | 方式一: `selector` | `selector: "#golbalSearch"` |
+| 链接需要精确点击 | 方式二: `match: href` | `match: href, value: "/openharmony"` |
+| 输入框有 placeholder | 方式一 或 方式二 | `selector: "input[placeholder='搜索项目']"` 或 `match: placeholder` |
+| 同 class 多按钮 | 方式二: `match: text` | `match: text, value: "登录"` |
+| 页面结构常变化 | 方式二 (属性值更稳定) | `match: href, value: "openharmony", match_mode: contains` |
+| 搜索结果列表项 | 方式二: `match: href` | `match: href, value: "kernel_linux_6.6"` |
+
+**原则**: 优先用唯一性最高的定位方式 (id > href > aria-label > text), 确保自动化流程的稳定性。
+
+---
+
+## 8. 项目结构
 
 ```
 chrome-auto-fetch/
@@ -832,7 +685,7 @@ chrome-auto-fetch/
 
 ---
 
-## 8. 下载地址提取方式
+## 9. 下载地址提取方式
 
 STEPS 中的 `extract` 步骤通过 `strategy` 参数选择提取方式:
 
@@ -904,7 +757,7 @@ STEPS 中 extract 步骤的 strategy 参数决定提取方式:
 
 ---
 
-## 9. 常见问题 (FAQ)
+## 10. 常见问题 (FAQ)
 
 ### Q1: Chrome 的"审批弹窗"怎么关闭?
 
@@ -1048,7 +901,7 @@ google-chrome --remote-debugging-port=9333 \
 
 ---
 
-## 10. 安全说明
+## 11. 安全说明
 
 ### 9.1 远程调试端口安全
 
@@ -1074,7 +927,7 @@ Debug Chrome 使用独立的用户数据目录 (默认 `~/chrome-debug-profile`)
 
 ---
 
-## 11. 许可证
+## 12. 许可证
 
 本项目基于 MIT 许可证开源。
 

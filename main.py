@@ -118,6 +118,11 @@ def main():
         default=DEFAULT_CONFIG_PATH,
         help="配置文件路径 (默认: config/config.yaml)",
     )
+    parser.add_argument(
+        "--url",
+        default=None,
+        help="Discovery 模式的目标网址 (不指定则使用 config.yaml 中的 TARGET_URL)",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -126,7 +131,8 @@ def main():
     cli = ChromeDevTools(config)
 
     if args.mode == "discover":
-        discover(cli, config)
+        url = args.url or config["TARGET_URL"]
+        discover(cli, config, url=url)
     elif args.mode == "auto":
         result = run_steps_with_retry(cli, config)
         print("\n结果: %s" % result['status'])

@@ -133,6 +133,54 @@ def execute_step(cli, step, variables, config, steps):
             return True, output, None
 
         elif action == "fill":
+            match_info = _resolve_match_to_selector(step)
+            default_delay = config.get("STEP_DELAY", 2)
+
+            if match_info:
+                fill_value = resolved.get("fill_value", resolved.get("value", ""))
+
+                if match_info["type"] == "css":
+                    selector = match_info["selector"]
+                    log.info("Fill by match: %s=%s → selector: %s, fill_value: %s", step.get("match"), step.get("value", ""), selector, fill_value)
+                    cli.fill(selector, fill_value)
+                    time.sleep(step.get("delay", 0.5))
+                    return True, "", None
+
+                elif match_info["type"] == "js_text":
+                    value = match_info["value"]
+                    tag = match_info.get("tag", "")
+                    match_mode = match_info.get("match_mode", "exact")
+                    log.info("Fill by text match: value=%s, tag=%s, fill_value=%s, match_mode=%s", value, tag, fill_value, match_mode)
+
+                    safe_value = _js_escape(value)
+                    safe_tag = _js_escape(tag) if tag else "''"
+                    safe_fill_value = _js_escape(fill_value)
+                    text_check = "el.textContent.trim() === %s" % safe_value if match_mode == "exact" else "el.textContent.trim().includes(%s)" % safe_value
+
+                    fill_js = (
+                        "(() => {"
+                        "  const els = document.querySelectorAll(%s || '*');"
+                        "  for (const el of els) {"
+                        "    if (%s) {"
+                        "      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {"
+                        "        el.value = %s;"
+                        "        el.dispatchEvent(new Event('input', {bubbles: true}));"
+                        "        el.dispatchEvent(new Event('change', {bubbles: true}));"
+                        "        return 'filled by text match';"
+                        "      }"
+                        "      return 'ERROR:element found but not an input';"
+                        "    }"
+                        "  }"
+                        "  return 'ERROR:no element with matching text found';"
+                        "})()"
+                    ) % (safe_tag, text_check, safe_fill_value)
+                    result = cli.evaluate(fill_js)
+                    if "ERROR" in result:
+                        on_fail = step.get("on_fail", "abort")
+                        return _handle_fail(on_fail, result), result, None
+                    time.sleep(step.get("delay", 0.5))
+                    return True, result, None
+
             params = resolved.get("params", {})
             if not params and resolved.get("selector"):
                 params = {resolved["selector"]: resolved.get("value", "")}
@@ -221,12 +269,91 @@ def execute_step(cli, step, variables, config, steps):
 
 
 def execute_click(cli, resolved, step, config):
+    match_info = _resolve_match_to_selector(step)
+    default_delay = config.get("STEP_DELAY", 2)
+
+    if match_info:
+        if resolved.get("selector"):
+            log.warning("Click step has both match and selector; selector ignored")
+
+        if match_info["type"] == "css":
+            selector = match_info["selector"]
+            log.info("Click by match: %s=%s → selector: %s", step.get("match"), step.get("value", ""), selector)
+            index = step.get("index", 1)
+
+            if str(index) == "last":
+                safe_selector = _js_escape(selector)
+                click_js = (
+                    "(() => {"
+                    "  const els = document.querySelectorAll(%s);"
+                    "  if (!els.length) return 'ERROR:no elements';"
+                    "  els[els.length - 1].click();"
+                    "  return 'clicked last (index ' + (els.length - 1) + ')';"
+                    "})()"
+                ) % safe_selector
+                result = cli.evaluate(click_js)
+                if "ERROR" in result:
+                    return False, result
+                time.sleep(step.get("delay", default_delay))
+                return True, result
+
+            elif index != 1:
+                idx = int(index) - 1
+                safe_selector = _js_escape(selector)
+                click_js = (
+                    "(() => {"
+                    "  const els = document.querySelectorAll(%s);"
+                    "  if (!els.length) return 'ERROR:no elements';"
+                    "  if (%d >= els.length) return 'ERROR:index %d out of range (total ' + els.length + ')';"
+                    "  els[%d].click();"
+                    "  return 'clicked index %d';"
+                    "})()"
+                ) % (safe_selector, idx, idx, idx, idx)
+                result = cli.evaluate(click_js)
+                if "ERROR" in result:
+                    return False, result
+                time.sleep(step.get("delay", default_delay))
+                return True, result
+
+            else:
+                output = cli.click(selector)
+                time.sleep(step.get("delay", default_delay))
+                return True, output
+
+        elif match_info["type"] == "js_text":
+            value = match_info["value"]
+            tag = match_info.get("tag", "")
+            match_mode = match_info.get("match_mode", "exact")
+            log.info("Click by text match: value=%s, tag=%s, match_mode=%s", value, tag, match_mode)
+
+            safe_value = _js_escape(value)
+            safe_tag = _js_escape(tag) if tag else "''"
+            text_check = "el.textContent.trim() === %s" % safe_value if match_mode == "exact" else "el.textContent.trim().includes(%s)" % safe_value
+
+            click_js = (
+                "(() => {"
+                "  const tag = %s;"
+                "  const els = document.querySelectorAll(tag || '*');"
+                "  for (const el of els) {"
+                "    if (%s) {"
+                "      el.click();"
+                "      return 'clicked by text match';"
+                "    }"
+                "  }"
+                "  return 'ERROR:no element with matching text found';"
+                "})()"
+            ) % (safe_tag, text_check)
+            result = cli.evaluate(click_js)
+            if "ERROR" in result:
+                return False, result
+            time.sleep(step.get("delay", default_delay))
+            return True, result
+
     selector = resolved.get("selector", "")
     if not selector:
         return True, "skip_empty_selector"
 
     index = step.get("index", 1)
-    default_delay = config.get("STEP_DELAY", 2)
 
     if str(index) == "last":
         safe_selector = _js_escape(selector)
@@ -537,6 +664,46 @@ def _handle_fail(on_fail, error_msg):
         log.warning("Step failed: %s (retry mode not yet implemented in single-step scope)", error_msg)
         raise RuntimeError(error_msg)
     raise RuntimeError(error_msg)
+
+
+def _resolve_match_to_selector(step):
+    """Convert match parameter to CSS selector or JS locator info.
+
+    Returns:
+        None — no match specified, use regular selector
+        {"type": "css", "selector": "..."} — can use cli.click(selector) directly
+        {"type": "js_text", "value": "...", "tag": "..."} — needs JS evaluation
+    """
+    match = step.get("match")
+    value = step.get("value", "")
+    tag = step.get("tag", "")
+    match_mode = step.get("match_mode", "exact")
+
+    if not match:
+        return None
+
+    # Attribute match types → CSS attribute selectors
+    attr_map = {
+        "href": "href",
+        "aria_label": "aria-label",
+        "aria-label": "aria-label",
+        "name": "name",
+        "placeholder": "placeholder",
+    }
+
+    if match in attr_map:
+        attr = attr_map[match]
+        prefix = tag if tag else ""
+        # CSS attribute selector: exact (=) or contains (*=)
+        op = "*=" if match_mode == "contains" else "="
+        selector = "%s[%s%s'%s']" % (prefix, attr, op, value)
+        return {"type": "css", "selector": selector}
+
+    elif match == "text":
+        # Can't match by text in CSS — need JS
+        return {"type": "js_text", "value": value, "tag": tag, "match_mode": match_mode}
+
+    return None
 
 
 def _js_escape(value):
