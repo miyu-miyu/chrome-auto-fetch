@@ -137,12 +137,12 @@ def execute_step(cli, step, variables, config, steps):
             default_delay = config.get("STEP_DELAY", 2)
 
             if match_info:
-                fill_value = resolved.get("fill_value", resolved.get("value", ""))
+                fill_content = resolved.get("content", "")
 
                 if match_info["type"] == "css":
                     selector = match_info["selector"]
-                    log.info("Fill by match: %s=%s → selector: %s, fill_value: %s", step.get("match"), step.get("value", ""), selector, fill_value)
-                    cli.fill(selector, fill_value)
+                    log.info("Fill by match: %s=%s → selector: %s, content: %s", step.get("match"), step.get("value", ""), selector, fill_content)
+                    cli.fill(selector, fill_content)
                     time.sleep(step.get("delay", 0.5))
                     return True, "", None
 
@@ -150,11 +150,11 @@ def execute_step(cli, step, variables, config, steps):
                     value = match_info["value"]
                     tag = match_info.get("tag", "")
                     match_mode = match_info.get("match_mode", "exact")
-                    log.info("Fill by text match: value=%s, tag=%s, fill_value=%s, match_mode=%s", value, tag, fill_value, match_mode)
+                    log.info("Fill by text match: value=%s, tag=%s, content=%s, match_mode=%s", value, tag, fill_content, match_mode)
 
                     safe_value = _js_escape(value)
                     safe_tag = _js_escape(tag) if tag else "''"
-                    safe_fill_value = _js_escape(fill_value)
+                    safe_content = _js_escape(fill_content)
                     text_check = "el.textContent.trim() === %s" % safe_value if match_mode == "exact" else "el.textContent.trim().includes(%s)" % safe_value
 
                     fill_js = (
@@ -173,7 +173,7 @@ def execute_step(cli, step, variables, config, steps):
                         "  }"
                         "  return 'ERROR:no element with matching text found';"
                         "})()"
-                    ) % (safe_tag, text_check, safe_fill_value)
+                    ) % (safe_tag, text_check, safe_content)
                     result = cli.evaluate(fill_js)
                     if "ERROR" in result:
                         on_fail = step.get("on_fail", "abort")
@@ -183,7 +183,7 @@ def execute_step(cli, step, variables, config, steps):
 
             params = resolved.get("params", {})
             if not params and resolved.get("selector"):
-                params = {resolved["selector"]: resolved.get("value", "")}
+                params = {resolved["selector"]: resolved.get("content", "")}
             for selector, value in params.items():
                 cli.fill(selector, value)
                 time.sleep(step.get("delay", 0.5))

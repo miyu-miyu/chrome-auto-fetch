@@ -20,7 +20,7 @@ TARGET_URL: ""
 #
 # 支持的 action 类型:
 #   navigate  — 导航到 URL                    参数: url
-#   fill      — 填入输入框/下拉框              参数: params={selector: value} 或 selector+value
+#   fill      — 填入输入框/下拉框              参数: params={selector: content} 或 selector+content, 或 match+value+content
 #   click     — 点击元素                       参数: selector, index(1/"last"/N)
 #   click_at  — 坐标点击                       参数: x, y
 #   type_text — 键盘输入文本                   参数: text, submit_key?(Enter等)

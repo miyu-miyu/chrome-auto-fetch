@@ -376,7 +376,7 @@ STEPS:
 | Action | 说明 | 主要参数 |
 |---|---|---|
 | `navigate` | 导航到 URL | `url` |
-| `fill` | 填入输入框/下拉框 | `params: {selector: value}` 或 `selector + value`, 或 `match + value + fill_value` |
+| `fill` | 填入输入框/下拉框 | `params: {selector: content}` 或 `selector + content`, 或 `match + value + content` |
 | `click` | 点击元素 | `selector`, `index: 1/"last"/N`, 或 `match + value` (详见第 7 章) |
 | `click_at` | 按坐标点击 | `x, y` |
 | `type_text` | 键盘输入文本 | `text`, `submit_key?: str` (Enter 等) |
@@ -534,13 +534,13 @@ Discovery 输出中使用 ★ 标记已验证唯一的选择器, ○ 标记非�
 - action: fill
   match: name
   value: "query"
-  fill_value: "OpenHarmony"
+  content: "OpenHarmony"
 
 # 按 placeholder 匹配输入框
 - action: fill
   match: placeholder
   value: "搜索项目"
-  fill_value: "OpenHarmony"
+  content: "OpenHarmony"
 ```
 
 **适用场景**:
@@ -575,7 +575,7 @@ Discovery 输出中使用 ★ 标记已验证唯一的选择器, ○ 标记非�
 - action: fill
   match: text
   value: "搜索项目"
-  fill_value: "OpenHarmony"
+  content: "OpenHarmony"
 ```
 
 **`match_mode` 对文本匹配的影响**:
@@ -633,7 +633,7 @@ Discovery 输出中使用 ★ 标记已验证唯一的选择器, ○ 标记非�
 
 通用规则:
 - `match` 和 `selector` 同时存在时, `match` 优先 (selector 被忽略)
-- `fill` 使用 `match` 时, `value` 是匹配搜索值, `fill_value` 是实际填入值; 不指定 `fill_value` 时用 `value` 兜底
+- `fill` 使用 `match` 时, `value` 是匹配搜索值, `content` 是实际填入值; `content` 为必填参数
 - `match: href` 的 `value` 使用 HTML 原始 href 属性值 (可能是相对路径如 `/openharmony`, 而非浏览器解析后的绝对 URL)
 
 ### 7.3 两种方式选择指南

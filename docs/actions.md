@@ -84,7 +84,11 @@
 
 ### 描述
 
-向页面中的输入框或下拉框填入文本内容。支持三种模式: `params` 字典模式、`selector + value` 模式、`match` 属性匹配模式 (用 `value` 搜索匹配, `fill_value` 指定填入内容)。
+向页面中的输入框或下拉框填入文本内容。支持三种模式: 
+
+- 模式一：`params` 字典模式
+- 模式二：`selector + content` 模式
+- 模式三：`match` 属性匹配模式 (用 `value` 搜索匹配, `content` 指定填入内容)。
 
 ### 参数
 
@@ -92,10 +96,10 @@
 |------|------|------|--------|------|
 | `action` | string | 是 | — | 必须为 `fill` |
 | `params` | dict | 否 | `{}` | 键值对: CSS 选择器 → 填入值 (模式一) |
-| `selector` | string | 否 | — | CSS 选择器, 配合 `value` 使用 (模式二) |
-| `value` | string | 否 | — | 模式二: 填入的值; 模式三: **匹配搜索值** (不是填入值)。如 `match: placeholder, value: "搜索项目"` 表示用 "搜索项目" 去匹配 placeholder 属性 |
+| `selector` | string | 否 | — | CSS 选择器, 配合 `content` 使用 (模式二) |
+| `content` | string | 条件必填 | — | 填入的值 (模式二/模式三)。使用模式二或模式三时必填 |
+| `value` | string | 条件必填 | — | **匹配搜索值** (仅模式三)。如 `match: placeholder, value: "搜索项目"` 表示用 "搜索项目" 去匹配 placeholder 属性。使用 match 时必填 |
 | `match` | string | 否 | — | 属性匹配类型: `href` / `aria_label` / `aria-label` / `name` / `placeholder` / `text` (模式三) |
-| `fill_value` | string | 否 | — | 模式三: **实际填入值** (这才是填进输入框的内容)。不指定时用 `value` 兜底, 但语义上两者不同 |
 | `tag` | string | 否 | `""` | 限定搜索的 HTML 标签 (仅 `match: text` 时有效) |
 | `match_mode` | string | 否 | `exact` | 匹配精度: `exact` (完全匹配) / `contains` (包含匹配) |
 | `delay` | number | 否 | 0.5 | 填入后的等待秒数 |
@@ -112,10 +116,10 @@
     "#version": "HarmonyOS 4.0"
     "#region": "中国"
 
-# 模式二: selector + value (单个字段)
+# 模式二: selector + content (单个字段)
 - action: fill
   selector: "#search-input"
-  value: "OpenHarmony"
+  content: "OpenHarmony"
 ```
 
 ### 进阶用法
@@ -125,20 +129,20 @@
 - action: fill
   match: name
   value: "query"
-  fill_value: "OpenHarmony"
+  content: "OpenHarmony"
 
 # 模式三: match 按 placeholder 定位
 - action: fill
   match: placeholder
   value: "搜索项目"
-  fill_value: "OpenHarmony"
+  content: "OpenHarmony"
 
 # 模式三: match 按文本内容定位输入框
 # 只在 INPUT/TEXTAREA 元素上有效, 其他标签会报错
 - action: fill
   match: text
   value: "请输入搜索内容"
-  fill_value: "OpenHarmony"
+  content: "OpenHarmony"
 
 # 模式三: match:text 配合 tag 缩小范围 + contains 模式
 - action: fill
@@ -146,7 +150,7 @@
   value: "搜索"
   tag: "input"
   match_mode: contains
-  fill_value: "HarmonyOS"
+  content: "HarmonyOS"
 
 # 变量引用填入
 - action: evaluate
@@ -164,10 +168,10 @@
 - 当 `match` 存在时, `selector` 被忽略
 - `match: text` 在 fill 中仅对 `<INPUT>` 和 `<TEXTAREA>` 元素有效。如果找到匹配文本的元素但不是输入框, 步骤会失败返回 `ERROR:element found but not an input`
 - `match: text` 的底层使用 JS 设置 `el.value` 并派发 `input` 和 `change` 事件, 能触发大部分前端框架的响应
-- `match` 为非 text 类型 (href/aria_label/name/placeholder) 时, 直接使用 `cli.fill(selector, fill_value)` 通过 CSS 属性选择器定位
+- `match` 为非 text 类型 (href/aria_label/name/placeholder) 时, 直接使用 `cli.fill(selector, content)` 通过 CSS 属性选择器定位
 - `match_mode: contains` 在属性类型中使用 CSS `*=`, 在 text 类型中使用 JS `.includes()`
-- `fill_value` 和 `value` 的关系: 指定 `fill_value` 时用 `fill_value`, 否则回退到 `value`
-- 在`match`模式时，`value`是`match`的传入值
+- `content` 和 `value` 语义完全不同: `content` 是填入值 (填进输入框的内容), `value` 是匹配搜索值 (match 用来定位元素的属性值)。两者不应混淆
+- 在 `match` 模式下, `value` 是必填的匹配搜索值, `content` 是必填的填入值; 不存在兜底关系
 - 详见元素定位方式 (README 第 7 章)
 
 ---
@@ -1295,7 +1299,7 @@ STEPS:
   - action: fill
     match: placeholder
     value: "搜索项目"
-    fill_value: "OpenHarmony"
+    content: "OpenHarmony"
   - action: click
     match: text
     value: "搜索"
