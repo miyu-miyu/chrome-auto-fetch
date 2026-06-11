@@ -1,9 +1,16 @@
 """
 步骤引擎 — 解析 STEPS 配置, 按序执行可编排的动作序列
 
-支持 16 种 action: navigate, fill, click, click_at, type_text, press_key,
+支持 17 种 action: navigate, fill, click, click_at, hover, type_text, press_key,
 wait (5 种策略), evaluate, extract, loop, screenshot, snapshot, new_page,
 list_pages, save, branch
+
+所有 click 操作使用 CDP 鼠标事件 (dispatchMouseEvent), 不再使用 JS .click():
+  - selector 模式: scrollIntoView → cli.click() (CDP)
+  - match:text 模式: JS 查找元素 → scrollIntoView → cli.click_at() (CDP)
+  - index!=1 模式: JS 查找元素 → scrollIntoView → cli.click_at() (CDP)
+
+自动规避遮挡: scrollIntoView({block:'center'}) + elementFromPoint 检测 + 偏移重试
 
 步骤可选 name 字段: 用于日志显示和 branch goto 按名称跳转
 branch 条件关键字: branches 列表格式 [{if, then}, {elif, then}, {else: 目标}]
@@ -23,6 +30,117 @@ from datetime import datetime
 from .result import save_result
 
 log = logging.getLogger("chrome_auto_fetch")
+
+_SCROLL_VIEW_JS = r"""
+(() => {
+  const sel = %s;
+  const idx = %s;
+  const el = (idx === null)
+    ? document.querySelector(sel)
+    : document.querySelectorAll(sel)[idx];
+  if (!el) return JSON.stringify({error: 'element not found'});
+  el.scrollIntoView({block: 'center', behavior: 'instant'});
+  const rect = el.getBoundingClientRect();
+  const cx = Math.round(rect.x + rect.width / 2);
+  const cy = Math.round(rect.y + rect.height / 2);
+  const hitEl = document.elementFromPoint(cx, cy);
+  const isTarget = (hitEl === el || el.contains(hitEl));
+  let occluderHeight = 0;
+  let offsetY = 0;
+  if (!isTarget && hitEl) {
+    occluderHeight = Math.round(hitEl.getBoundingClientRect().height);
+    offsetY = cy - occluderHeight - 10;
+    const hitAfter = document.elementFromPoint(cx, offsetY);
+    const isTargetAfter = (hitAfter === el || el.contains(hitAfter));
+    if (!isTargetAfter) { offsetY = 0; }
+  }
+  return JSON.stringify({
+    x: cx, y: cy,
+    isTarget: isTarget,
+    occluderHeight: occluderHeight,
+    offsetY: offsetY > 0 ? offsetY : cy,
+    tag: el.tagName.toLowerCase(),
+    text: el.textContent.trim().substring(0, 40)
+  });
+})()
+"""
+
+_FIND_BY_TEXT_JS = r"""
+(() => {
+  const tag = %s;
+  const check = %s;
+  const mode = %s;
+  const els = document.querySelectorAll(tag || '*');
+  for (let i = 0; i < els.length; i++) {
+    const el = els[i];
+    const text = el.textContent.trim();
+    if (mode === 'exact' ? text === check : text.includes(check)) {
+      el.scrollIntoView({block: 'center', behavior: 'instant'});
+      const rect = el.getBoundingClientRect();
+      const cx = Math.round(rect.x + rect.width / 2);
+      const cy = Math.round(rect.y + rect.height / 2);
+      const hitEl = document.elementFromPoint(cx, cy);
+      const isTarget = (hitEl === el || el.contains(hitEl));
+      let occluderHeight = 0;
+      let offsetY = 0;
+      if (!isTarget && hitEl) {
+        occluderHeight = Math.round(hitEl.getBoundingClientRect().height);
+        offsetY = cy - occluderHeight - 10;
+        const hitAfter = document.elementFromPoint(cx, offsetY);
+        const isTargetAfter = (hitAfter === el || el.contains(hitAfter));
+        if (!isTargetAfter) { offsetY = 0; }
+      }
+      return JSON.stringify({
+        x: cx, y: cy,
+        isTarget: isTarget,
+        occluderHeight: occluderHeight,
+        offsetY: offsetY > 0 ? offsetY : cy,
+        found: true,
+        index: i,
+        tag: el.tagName.toLowerCase(),
+        text: text.substring(0, 40)
+      });
+    }
+  }
+  return JSON.stringify({found: false, error: 'no element with matching text'});
+})()
+"""
+
+_FIND_AND_SCROLL_JS = r"""
+(() => {
+  const sel = %s;
+  const idx = %s;
+  const els = document.querySelectorAll(sel);
+  if (!els.length) return JSON.stringify({error: 'no elements for selector', count: 0});
+  const targetIdx = (idx === 'last') ? els.length - 1 : parseInt(idx);
+  if (targetIdx < 0 || targetIdx >= els.length) return JSON.stringify({error: 'index out of range', count: els.length});
+  const el = els[targetIdx];
+  el.scrollIntoView({block: 'center', behavior: 'instant'});
+  const rect = el.getBoundingClientRect();
+  const cx = Math.round(rect.x + rect.width / 2);
+  const cy = Math.round(rect.y + rect.height / 2);
+  const hitEl = document.elementFromPoint(cx, cy);
+  const isTarget = (hitEl === el || el.contains(hitEl));
+  let occluderHeight = 0;
+  let offsetY = 0;
+  if (!isTarget && hitEl) {
+    occluderHeight = Math.round(hitEl.getBoundingClientRect().height);
+    offsetY = cy - occluderHeight - 10;
+    const hitAfter = document.elementFromPoint(cx, offsetY);
+    const isTargetAfter = (hitAfter === el || el.contains(hitAfter));
+    if (!isTargetAfter) { offsetY = 0; }
+  }
+  return JSON.stringify({
+    x: cx, y: cy,
+    isTarget: isTarget,
+    occluderHeight: occluderHeight,
+    offsetY: offsetY > 0 ? offsetY : cy,
+    tag: el.tagName.toLowerCase(),
+    text: el.textContent.trim().substring(0, 40),
+    total: els.length
+  });
+})()
+"""
 
 
 def run_steps(cli, config):
@@ -142,6 +260,13 @@ def execute_step(cli, step, variables, config, steps):
                 if match_info["type"] == "css":
                     selector = match_info["selector"]
                     log.info("Fill by match: %s=%s → selector: %s, content: %s", step.get("match"), step.get("value", ""), selector, fill_content)
+                    scroll_js = _SCROLL_VIEW_JS % (_js_escape(selector), "null")
+                    scroll_result = cli.evaluate(scroll_js)
+                    scroll_info = json.loads(_strip_cli_hint(scroll_result.strip()))
+                    if "error" not in scroll_info:
+                        time.sleep(0.3)
+                        cli.click(selector)
+                        time.sleep(0.2)
                     cli.fill(selector, fill_content)
                     time.sleep(step.get("delay", 0.5))
                     return True, "", None
@@ -185,6 +310,13 @@ def execute_step(cli, step, variables, config, steps):
             if not params and resolved.get("selector"):
                 params = {resolved["selector"]: resolved.get("content", "")}
             for selector, value in params.items():
+                scroll_js = _SCROLL_VIEW_JS % (_js_escape(selector), "null")
+                scroll_result = cli.evaluate(scroll_js)
+                scroll_info = json.loads(_strip_cli_hint(scroll_result.strip()))
+                if "error" not in scroll_info:
+                    time.sleep(0.3)
+                    cli.click(selector)
+                    time.sleep(0.2)
                 cli.fill(selector, value)
                 time.sleep(step.get("delay", 0.5))
             return True, "", None
@@ -192,6 +324,20 @@ def execute_step(cli, step, variables, config, steps):
         elif action == "click":
             success, output = execute_click(cli, resolved, step, config)
             return success, output, None
+
+        elif action == "hover":
+            selector = resolved.get("selector", "")
+            if not selector:
+                return True, "skip_empty_selector", None
+            scroll_js = _SCROLL_VIEW_JS % (_js_escape(selector), "null")
+            scroll_result = cli.evaluate(scroll_js)
+            scroll_info = json.loads(_strip_cli_hint(scroll_result.strip()))
+            if "error" in scroll_info:
+                return False, scroll_info["error"], None
+            time.sleep(0.3)
+            output = cli.hover(selector)
+            time.sleep(step.get("delay", default_delay))
+            return True, output, None
 
         elif action == "click_at":
             output = cli.click_at(int(resolved["x"]), int(resolved["y"]))
@@ -268,9 +414,87 @@ def execute_step(cli, step, variables, config, steps):
         return _handle_fail(on_fail, msg), msg, None
 
 
+def _strip_cli_hint(text):
+    """chrome-devtools evaluate 输出可能包含 [HINT] 行, 需剥离后再解析 JSON"""
+    lines = text.split('\n')
+    clean_lines = [l for l in lines if not l.strip().startswith('[HINT')]
+    return '\n'.join(clean_lines).strip()
+
+
+def _smart_click_at(cli, selector, index_val=None, label=""):
+    """scrollIntoView + 遮挡检测 + 偏移重试 → cli.click_at()
+
+    index_val: None=querySelector第一个, 'last'=最后一个, 数字=第N个(0-based)
+    label: 日志标识 (如 "click by match:text")
+    """
+    safe_sel = _js_escape(selector)
+    idx_arg = _js_escape(str(index_val)) if index_val is not None else "null"
+
+    js = _FIND_AND_SCROLL_JS % (safe_sel, idx_arg)
+    result = cli.evaluate(js)
+    info = json.loads(_strip_cli_hint(result.strip()))
+
+    if "error" in info:
+        log.warning("%s: %s (selector=%s)", label, info["error"], selector)
+        return False, info["error"]
+
+    x, y = info["x"], info["y"]
+
+    if info.get("isTarget"):
+        log.info("%s: CDP click (%d, %d) on <%s> — 唯一命中 ✓", label, x, y, info.get("tag", ""))
+    else:
+        occluder = info.get("occluderHeight", 0)
+        adjusted_y = info.get("offsetY", y)
+        if adjusted_y != y and adjusted_y > 0:
+            log.warning("%s: 中心点(%d,%d)被遮挡(高度%d), 偏移至(%d,%d)", label, x, y, occluder, x, adjusted_y)
+            y = adjusted_y
+        else:
+            log.warning("%s: 中心点(%d,%d)被遮挡, 无法自动偏移 — 继续点击原坐标", label, x, y)
+
+    time.sleep(0.3)
+    output = cli.click_at(x, y)
+    detail = "%s: clicked <%s> at (%d,%d)" % (label, info.get("tag", ""), x, y)
+    log.info(detail)
+    return True, detail
+
+
+def _smart_click_at_by_text(cli, value, tag, match_mode, label="click by text match"):
+    """JS 查找文本匹配元素 → scrollIntoView + 遮挡检测 → cli.click_at()"""
+    safe_tag = _js_escape(tag) if tag else "''"
+    safe_value = _js_escape(value)
+    mode_arg = _js_escape(match_mode)
+
+    js = _FIND_BY_TEXT_JS % (safe_tag, safe_value, mode_arg)
+    result = cli.evaluate(js)
+    info = json.loads(_strip_cli_hint(result.strip()))
+
+    if not info.get("found"):
+        log.warning("%s: %s", label, info.get("error", "not found"))
+        return False, info.get("error", "no element with matching text")
+
+    x, y = info["x"], info["y"]
+
+    if info.get("isTarget"):
+        log.info("%s: CDP click (%d, %d) on <%s> text='%s' — 唯一命中 ✓", label, x, y, info.get("tag", ""), info.get("text", ""))
+    else:
+        occluder = info.get("occluderHeight", 0)
+        adjusted_y = info.get("offsetY", y)
+        if adjusted_y != y and adjusted_y > 0:
+            log.warning("%s: 中心点(%d,%d)被遮挡(高度%d), 偏移至(%d,%d)", label, x, y, occluder, x, adjusted_y)
+            y = adjusted_y
+        else:
+            log.warning("%s: 中心点(%d,%d)被遮挡, 无法自动偏移 — 继续点击原坐标", label, x, y)
+
+    time.sleep(0.3)
+    output = cli.click_at(x, y)
+    detail = "%s: clicked <%s> text='%s' at (%d,%d)" % (label, info.get("tag", ""), info.get("text", ""), x, y)
+    log.info(detail)
+    return True, detail
+
+
 def execute_click(cli, resolved, step, config):
-    match_info = _resolve_match_to_selector(step)
     default_delay = config.get("STEP_DELAY", 2)
+    match_info = _resolve_match_to_selector(step)
 
     if match_info:
         if resolved.get("selector"):
@@ -278,45 +502,31 @@ def execute_click(cli, resolved, step, config):
 
         if match_info["type"] == "css":
             selector = match_info["selector"]
-            log.info("Click by match: %s=%s → selector: %s", step.get("match"), step.get("value", ""), selector)
             index = step.get("index", 1)
+            log.info("Click by match: %s=%s → selector: %s, index: %s", step.get("match"), step.get("value", ""), selector, index)
 
             if str(index) == "last":
-                safe_selector = _js_escape(selector)
-                click_js = (
-                    "(() => {"
-                    "  const els = document.querySelectorAll(%s);"
-                    "  if (!els.length) return 'ERROR:no elements';"
-                    "  els[els.length - 1].click();"
-                    "  return 'clicked last (index ' + (els.length - 1) + ')';"
-                    "})()"
-                ) % safe_selector
-                result = cli.evaluate(click_js)
-                if "ERROR" in result:
-                    return False, result
+                success, output = _smart_click_at(cli, selector, index_val="last", label="click by match (last)")
                 time.sleep(step.get("delay", default_delay))
-                return True, result
+                return success, output
 
             elif index != 1:
                 idx = int(index) - 1
-                safe_selector = _js_escape(selector)
-                click_js = (
-                    "(() => {"
-                    "  const els = document.querySelectorAll(%s);"
-                    "  if (!els.length) return 'ERROR:no elements';"
-                    "  if (%d >= els.length) return 'ERROR:index %d out of range (total ' + els.length + ')';"
-                    "  els[%d].click();"
-                    "  return 'clicked index %d';"
-                    "})()"
-                ) % (safe_selector, idx, idx, idx, idx)
-                result = cli.evaluate(click_js)
-                if "ERROR" in result:
-                    return False, result
+                success, output = _smart_click_at(cli, selector, index_val=str(idx), label="click by match (index %d)" % index)
                 time.sleep(step.get("delay", default_delay))
-                return True, result
+                return success, output
 
             else:
+                safe_sel = _js_escape(selector)
+                idx_arg = "null"
+                js = _SCROLL_VIEW_JS % (safe_sel, idx_arg)
+                result = cli.evaluate(js)
+                info = json.loads(_strip_cli_hint(result.strip()))
+                if "error" in info:
+                    return False, info["error"]
+                time.sleep(0.3)
                 output = cli.click(selector)
+                log.info("click by match: selector=%s → CDP click ✓", selector)
                 time.sleep(step.get("delay", default_delay))
                 return True, output
 
@@ -325,72 +535,39 @@ def execute_click(cli, resolved, step, config):
             tag = match_info.get("tag", "")
             match_mode = match_info.get("match_mode", "exact")
             log.info("Click by text match: value=%s, tag=%s, match_mode=%s", value, tag, match_mode)
-
-            safe_value = _js_escape(value)
-            safe_tag = _js_escape(tag) if tag else "''"
-            text_check = "el.textContent.trim() === %s" % safe_value if match_mode == "exact" else "el.textContent.trim().includes(%s)" % safe_value
-
-            click_js = (
-                "(() => {"
-                "  const tag = %s;"
-                "  const els = document.querySelectorAll(tag || '*');"
-                "  for (const el of els) {"
-                "    if (%s) {"
-                "      el.click();"
-                "      return 'clicked by text match';"
-                "    }"
-                "  }"
-                "  return 'ERROR:no element with matching text found';"
-                "})()"
-            ) % (safe_tag, text_check)
-            result = cli.evaluate(click_js)
-            if "ERROR" in result:
-                return False, result
+            success, output = _smart_click_at_by_text(cli, value, tag, match_mode)
             time.sleep(step.get("delay", default_delay))
-            return True, result
+            return success, output
 
     selector = resolved.get("selector", "")
     if not selector:
         return True, "skip_empty_selector"
 
     index = step.get("index", 1)
+    log.info("Click by selector: %s, index: %s", selector, index)
 
     if str(index) == "last":
-        safe_selector = _js_escape(selector)
-        click_js = (
-            "(() => {"
-            "  const els = document.querySelectorAll(%s);"
-            "  if (!els.length) return 'ERROR:no elements';"
-            "  els[els.length - 1].click();"
-            "  return 'clicked last (index ' + (els.length - 1) + ')';"
-            "})()"
-        ) % safe_selector
-        result = cli.evaluate(click_js)
-        if "ERROR" in result:
-            return False, result
+        success, output = _smart_click_at(cli, selector, index_val="last", label="click selector (last)")
         time.sleep(step.get("delay", default_delay))
-        return True, result
+        return success, output
 
     elif index != 1:
         idx = int(index) - 1
-        safe_selector = _js_escape(selector)
-        click_js = (
-            "(() => {"
-            "  const els = document.querySelectorAll(%s);"
-            "  if (!els.length) return 'ERROR:no elements';"
-            "  if (%d >= els.length) return 'ERROR:index %d out of range (total ' + els.length + ')';"
-            "  els[%d].click();"
-            "  return 'clicked index %d';"
-            "})()"
-        ) % (safe_selector, idx, idx, idx, idx)
-        result = cli.evaluate(click_js)
-        if "ERROR" in result:
-            return False, result
+        success, output = _smart_click_at(cli, selector, index_val=str(idx), label="click selector (index %d)" % index)
         time.sleep(step.get("delay", default_delay))
-        return True, result
+        return success, output
 
     else:
+        safe_sel = _js_escape(selector)
+        idx_arg = "null"
+        js = _SCROLL_VIEW_JS % (safe_sel, idx_arg)
+        result = cli.evaluate(js)
+        info = json.loads(_strip_cli_hint(result.strip()))
+        if "error" in info:
+            return False, info["error"]
+        time.sleep(0.3)
         output = cli.click(selector)
+        log.info("click selector: %s → CDP click ✓", selector)
         time.sleep(step.get("delay", default_delay))
         return True, output
 

@@ -23,6 +23,7 @@ TARGET_URL: ""
 #   fill      — 填入输入框/下拉框              参数: params={selector: content} 或 selector+content, 或 match+value+content
 #   click     — 点击元素                       参数: selector, index(1/"last"/N)
 #   click_at  — 坐标点击                       参数: x, y
+#   hover     — 悬停在元素上(触发mouseover)     参数: selector
 #   type_text — 键盘输入文本                   参数: text, submit_key?(Enter等)
 #   press_key — 按键                           参数: key (Escape/Enter/Tab等)
 #   wait      — 等待条件                       参数: strategy, value/selector/expr, timeout

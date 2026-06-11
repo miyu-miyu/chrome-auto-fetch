@@ -401,8 +401,9 @@ STEPS:
 |---|---|---|
 | `navigate` | 导航到 URL | `url` |
 | `fill` | 填入输入框/下拉框 | `params: {selector: content}` 或 `selector + content`, 或 `match + value + content` |
-| `click` | 点击元素 | `selector`, `index: 1/"last"/N`, 或 `match + value` (详见第 7 章) |
+| `click` | 点击元素 (自动 scrollIntoView + 遮挡规避) | `selector`, `index: 1/"last"/N`, 或 `match + value` (详见第 7 章) |
 | `click_at` | 按坐标点击 | `x, y` |
+| `hover` | 悬停在元素上 (触发 mouseover) | `selector` |
 | `type_text` | 键盘输入文本 | `text`, `submit_key?: str` (Enter 等) |
 | `press_key` | 按键 | `key` (Escape, Enter, Tab...) |
 | `wait` | 等待条件 (5 种策略) | `strategy`, `value/selector/expr`, `timeout` |

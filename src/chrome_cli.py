@@ -126,6 +126,11 @@ class ChromeDevTools:
         log.info("点击: %s", selector)
         return result.stdout.strip()
 
+    def hover(self, selector):
+        result = self._run(self._cmd("hover", [selector]), timeout=15)
+        log.info("悬停: %s", selector)
+        return result.stdout.strip()
+
     def click_at(self, x, y):
         result = self._run(self._cmd("click-at", [str(x), str(y)]), timeout=15)
         log.info("点击坐标: (%s, %s)", x, y)

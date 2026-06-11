@@ -166,6 +166,7 @@
 
 - `params`、`selector`、`match` 三者不能混用。优先级: `match` > `params` > `selector`
 - 当 `match` 存在时, `selector` 被忽略
+- **自动规避遮挡**: fill 前自动执行 `scrollIntoView({block:'center'})` 将输入框滚动到视口中央，然后先 click 获取焦点再 fill
 - `match: text` 在 fill 中仅对 `<INPUT>` 和 `<TEXTAREA>` 元素有效。如果找到匹配文本的元素但不是输入框, 步骤会失败返回 `ERROR:element found but not an input`
 - `match: text` 的底层使用 JS 设置 `el.value` 并派发 `input` 和 `change` 事件, 能触发大部分前端框架的响应
 - `match` 为非 text 类型 (href/aria_label/name/placeholder) 时, 直接使用 `cli.fill(selector, content)` 通过 CSS 属性选择器定位
@@ -263,12 +264,13 @@
 
 ### 注意事项
 
-- `match` 和 `selector` 同时存在时, `match` 优先, `selector` 被忽略 (代码会输出警告日志)
-- `index: "last"` 使用 JS 在浏览器端定位, 比 CSS `:last-child` 更可靠
-- `index: N` 使用 0-based JS 索引, 所以 `index: 2` 点击的是匹配列表中的第二个元素
-- 当 `index` 超出匹配元素范围时, 步骤失败并返回 `ERROR:index N out of range`
+- 所有 click 操作**统一使用 CDP 鼠标事件** (`Input.dispatchMouseEvent`)，不再使用 JS `.click()`。这意味着每次点击都会触发真实鼠标事件链 (mouseMoved → mousePressed → mouseReleased)，与手动点击行为一致
+- **自动规避遮挡**: 点击前自动执行 `scrollIntoView({block:'center'})` 将元素滚动到视口中央；如果中心坐标被 `position:fixed/sticky` 的元素遮挡，自动计算偏移坐标重试点击
+- `match` 和 `selector` 同时存在时, `match` 优先, `selector` 被忽略
+- `index: N` 和 `index: "last"` 路径也使用 CDP 鼠标事件（先 JS 查找元素 → scrollIntoView → click_at 坐标点击），而非 JS `.click()`
+- 当 `index` 超出匹配元素范围时, 步骤失败
 - 当 `selector` 为空字符串且没有 `match` 时, 步骤会 `skip_empty_selector` 不执行点击
-- `match: text` 点击通过 JS 遍历页面上所有 (或指定 `tag` 的) 元素, 找到文本匹配的第一个元素并调用 `.click()`, 如果都没找到则返回 `ERROR:no element with matching text found`
+- 如果元素需要先触发 mouseover 才能正确点击（如 AngularJS ng-click 元素），在 click 前加一个 `hover` 步骤
 - 详见元素定位方式 (README 第 7 章)
 
 ---
@@ -304,6 +306,58 @@
 - 页面滚动时坐标需要相应调整, 不适合页面结构动态变化的场景
 - 建议只在 Discovery 模式确认坐标后使用, 或用于点击 Canvas / SVG 等无法用 CSS 选择器定位的元素
 - `x` 和 `y` 参数支持 `${变量名}` 引用
+
+---
+
+## hover
+
+### 描述
+
+将鼠标悬停在指定元素上，触发 `mouseover` / `mouseenter` 事件。适用于需要先触发 hover 状态才能正确点击的元素，如 AngularJS `ng-click` 元素、下拉菜单、tooltip 弹出等。
+
+hover 操作自动执行 `scrollIntoView({block:'center'})`，确保元素在视口内。
+
+### 参数
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `action` | string | 是 | — | 必须为 `hover` |
+| `selector` | string | 是 | — | CSS 选择器 |
+| `delay` | number | 否 | `STEP_DELAY` (默认 2s) | 悬停后的等待秒数 |
+| `name` | string | 否 | — | 步骤标签 |
+
+### 用法
+
+```yaml
+# 悬停触发下拉菜单
+- action: hover
+  selector: ".dropdown-trigger"
+- action: click
+  selector: ".dropdown-item:nth-of-type(3)"
+
+# 悬停触发 AngularJS mouseover 事件
+- action: hover
+  selector: "td[ng-click*='log'] span.folderStyle"
+- action: click
+  selector: "td[ng-click*='log'] span.folderStyle"
+
+# 悬停触发 tooltip，然后点击 tooltip 中的按钮
+- action: hover
+  selector: ".info-icon"
+- action: wait
+  strategy: element
+  selector: ".tooltip .action-btn"
+  timeout: 3000
+- action: click
+  selector: ".tooltip .action-btn"
+```
+
+### 注意事项
+
+- hover 使用 CDP `Input.dispatchMouseEvent` (mouseMoved 事件)，与手动悬停行为一致
+- hover 后如果需要等待元素出现，应加一个 `wait` 步骤
+- 常见场景: AngularJS 的 `ng-click` 元素需要先 hover 触发 `mouseover`，否则直接 click 可能导致 `ng-hide` 状态不一致
+- 如果元素本身不需要 hover 前置操作，直接用 `click` 即可（click 已包含自动 scrollIntoView）
 
 ---
 
