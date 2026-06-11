@@ -533,8 +533,22 @@ def execute_loop(cli, resolved, step, variables, config):
     max_iterations = step.get("max_iterations", 30)
     interval_sec = step.get("interval", 2000) / 1000
     on_timeout = step.get("on_timeout", "fail")
+    each_steps = step.get("each", None)
 
     for i in range(max_iterations):
+        # 执行 each 子步骤 (每轮条件检查前执行)
+        if each_steps:
+            for sub_step in each_steps:
+                sub_action = sub_step.get("action", "")
+                log.info("Loop each[%d]: %s", i, sub_action)
+                try:
+                    success, output, _ = execute_step(cli, sub_step, variables, config, [])
+                except RuntimeError as e:
+                    log.warning("Loop each[%d] %s failed: %s, skipping", i, sub_action, e)
+                    continue
+                if sub_step.get("save_to") and output:
+                    variables[sub_step["save_to"]] = output.strip() if isinstance(output, str) else output
+
         if condition == "js":
             result = cli.evaluate(resolved.get("expr", "")).strip()
             if result and result not in ("false", "null", "undefined", "0", "NaN", ""):

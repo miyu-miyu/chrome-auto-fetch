@@ -28,7 +28,7 @@ TARGET_URL: ""
 #   wait      — 等待条件                       参数: strategy, value/selector/expr, timeout
 #   evaluate  — 执行 JS 表达式                 参数: expr, save_to?(变量名)
 #   extract   — 提取下载链接                   参数: strategy(css/js/semantic/auto), selector/expr
-#   loop      — 循环检查直到条件满足            参数: condition, expr/selector/value, max_iterations, interval, on_timeout
+#   loop      — 循环检查直到条件满足            参数: condition, expr/selector/value, each?(每轮子步骤), max_iterations, interval, on_timeout
 #   branch    — 条件分支跳转                   参数: branches=[{if:JS, then:目标}, {elif:JS, then:目标}, {else:目标}]
 #   screenshot— 截图                           参数: output?(路径)
 #   snapshot  — 获取 Accessibility Tree         参数: format?("text"/"json"), save_to?
@@ -154,6 +154,31 @@ TARGET_URL: ""
 #     strategy: js
 #     expr: "document.querySelector('.download-btn').href"
 #     save_to: "download_url"
+#   - action: save
+
+# 示例 5: loop + each: 虚拟滚动下拉框 (逐轮滚动直到目标选项出现)
+# STEPS:
+#   - action: navigate
+#     url: "https://example.com/search"
+#   - action: click
+#     selector: ".dropdown-trigger"
+#   - action: wait
+#     strategy: element
+#     selector: ".dropdown-menu"
+#   - action: loop
+#     condition: js
+#     expr: "document.querySelector('.dropdown-menu li[data-value=\"openharmony\"]') !== null"
+#     max_iterations: 50
+#     interval: 500
+#     each:
+#       - action: evaluate
+#         expr: "document.querySelector('.dropdown-menu').scrollTop += 200"
+#   - action: evaluate
+#     expr: "document.querySelector('.dropdown-menu li[data-value=\"openharmony\"]').scrollIntoView({block:'center'})"
+#   - action: click
+#     match: text
+#     value: "OpenHarmony"
+#     tag: "li"
 #   - action: save
 
 # 示例 5: 条件分支 — 根据搜索结果类型跳转到不同流程

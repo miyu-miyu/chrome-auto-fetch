@@ -2,7 +2,7 @@
 
 本文档是 chrome-auto-fetch 全部 16 种 STEPS action 类型的完整参考手册。内容基于 `src/step_engine.py` 的实现细节和 README 第 6 章的描述整理而成。每个 action 均包含参数表、YAML 示例、进阶用法和注意事项。
 
-若对元素定位方式 (`match` / `selector`) 不熟悉, 请先阅读 README 第 7 章 "元素定位方式"。
+若对元素定位方式 (`match` / `selector`) 不熟悉, 请先阅读 README 第 7 章 "元素定位方式" 和 **[选择器入门指南](selector-guide.md)**。
 
 ---
 
@@ -666,7 +666,9 @@ truthy 判断: 返回值不为空, 且不在 `false`、`null`、`undefined`、`0
 
 ### 描述
 
-循环检查某个条件是否满足, 直到条件满足或达到最大迭代次数。适用于等待异步过程完成 (如进度条 100%、文件生成完成)。
+循环检查某个条件是否满足, 直到条件满足或达到最大迭代次数。适用于等待异步过程完成 (如进度条 100%、文件生成完成)、虚拟滚动下拉框逐轮滚动加载等场景。
+
+`each` 参数允许在每轮条件检查前执行一组子步骤, 实现"每轮执行动作 → 检查条件"的循环模式。
 
 ### 参数
 
@@ -677,6 +679,7 @@ truthy 判断: 返回值不为空, 且不在 `false`、`null`、`undefined`、`0
 | `expr` | string | 否 | — | JS 条件表达式 (condition=`js` 时必填) |
 | `selector` | string | 否 | — | CSS 选择器 (condition=`element_exists` 时必填) |
 | `value` | string | 否 | — | 文本内容 (condition=`text_exists` 时必填) |
+| `each` | list | 否 | — | 每轮条件检查前执行的子步骤列表, 子步骤支持所有 action 类型 |
 | `max_iterations` | int | 否 | 30 | 最多循环检查次数 |
 | `interval` | int | 否 | 2000 | 每次检查间隔 (毫秒) |
 | `on_timeout` | string | 否 | `fail` | 超时后行为: `fail` / `continue` / `extract_and_continue` |
@@ -693,6 +696,66 @@ truthy 判断: 返回值不为空, 且不在 `false`、`null`、`undefined`、`0
   max_iterations: 60
   interval: 2000
   on_timeout: fail
+```
+
+### each: 每轮执行子步骤
+
+`each` 参数接受一个子步骤列表, 在每轮条件检查**前**执行。每轮的执行顺序:
+
+```
+第1轮: 执行 each 子步骤 → 检查 condition → 不满足 → sleep(interval)
+第2轮: 执行 each 子步骤 → 检查 condition → 不满足 → sleep(interval)
+...
+第N轮: 执行 each 子步骤 → 检查 condition → 满足 → 返回成功
+```
+
+子步骤支持所有 action 类型 (evaluate, click, fill, wait 等), 子步骤失败不会终止 loop, 只会跳过该子步骤继续执行。子步骤的 `save_to` 结果存入 variables, 供后续轮次或主流程使用。
+
+**典型场景: 虚拟滚动下拉框** — 下拉框列表很长, 目标选项不在 DOM 中, 需要每轮滚动容器让新选项加载到 DOM, 然后检查目标选项是否出现:
+
+```yaml
+# 先点击展开下拉框
+- action: click
+  selector: ".dropdown-trigger"
+
+- action: wait
+  strategy: element
+  selector: ".dropdown-menu"
+
+# 循环滚动下拉框, 直到目标选项出现在 DOM 中
+- action: loop
+  condition: js
+  expr: "document.querySelector('.dropdown-menu li[data-value=\"openharmony\"]') !== null"
+  max_iterations: 50
+  interval: 500
+  each:
+    - action: evaluate
+      expr: "document.querySelector('.dropdown-menu').scrollTop += 200"
+
+# 目标选项已出现, 滚动到可视区域并点击
+- action: evaluate
+  expr: "document.querySelector('.dropdown-menu li[data-value=\"openharmony\"]').scrollIntoView({block:'center'})"
+
+- action: click
+  match: text
+  value: "OpenHarmony"
+  tag: "li"
+```
+
+**子步骤使用 save_to 提取变量** — 每轮提取滚动位置, 供条件表达式使用:
+
+```yaml
+- action: loop
+  condition: js
+  expr: "parseInt(${scroll_pos}) >= 10000"
+  max_iterations: 100
+  interval: 1000
+  each:
+    - action: evaluate
+      expr: "document.querySelector('.scroll-container').scrollTop.toString()"
+      save_to: "scroll_pos"
+    - action: evaluate
+      expr: "document.querySelector('.scroll-container').scrollTop += 300"
 ```
 
 ### 进阶用法
@@ -728,6 +791,16 @@ truthy 判断: 返回值不为空, 且不在 `false`、`null`、`undefined`、`0
   interval: 2000
   on_timeout: extract_and_continue
   save_to: "download_urls"
+
+# each + element_exists: 滚动直到目标元素出现
+- action: loop
+  condition: element_exists
+  selector: ".dropdown-menu li[data-value='openharmony']"
+  max_iterations: 50
+  interval: 500
+  each:
+    - action: evaluate
+      expr: "document.querySelector('.dropdown-menu').scrollTop += 200"
 ```
 
 ### on_timeout 行为对比
@@ -746,6 +819,9 @@ truthy 判断: 返回值不为空, 且不在 `false`、`null`、`undefined`、`0
 - `condition: js` 的 truthy 判断与 `wait` 的 `js` 策略相同: 排除 `false` / `null` / `undefined` / `0` / `NaN` / `""`
 - `extract_and_continue` 是安全的兜底策略, 即使 loop 超时也能尽可能获取已有结果
 - loop 自身的 `on_fail` 与步骤级的 `on_fail` 是两套机制, 不要混淆
+- `each` 子步骤失败不会终止 loop, 只会跳过当前子步骤继续执行后续子步骤和条件检查
+- `each` 子步骤不支持 `branch` (跳转到主流程的其他步骤) 和嵌套 `loop`, 仅支持执行型 action (evaluate, click, fill, wait 等)
+- `each` 子步骤中的 `save_to` 会将结果存入主流程的 `variables`, 供后续轮次读取
 
 ---
 

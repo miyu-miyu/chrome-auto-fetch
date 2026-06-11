@@ -150,9 +150,9 @@ STEPS 配置详见 [第 6 章](#6-自定义步骤流程-steps)。
 
 ## 5. 使用方式
 
-### 5.1 Discovery 模式：探索页面结构⭐️
+### 5.1 Discovery 模式：探索页面可交互元素
 
-首次使用某个网站时，你并不知道页面元素对应的 CSS 选择器是什么。Discovery 模式帮你解决这个问题:
+Discovery 模式帮你快速了解页面上有哪些可交互元素（输入框、按钮、链接等），以及它们的选择器候选。
 
 ```bash
 # 使用 config.yaml 中的 TARGET_URL
@@ -162,40 +162,64 @@ python3 main.py --mode discover
 python3 main.py --mode discover --url "https://gitcode.com/search?q=OpenHarmony&type=repo"
 ```
 
-`--url` 参数适合以下场景:
-- 临时探索某个页面，不想修改 config.yaml
-- 已经在 config.yaml 中配了首页 URL，但想探索搜索结果页等子页面
-- 同一个网站需要多次 discover 不同页面
+`--url` 参数适合临时探索某个页面而不想修改 config.yaml。
 
-运行后，工具会依次输出 5 个部分:
+运行后输出 3 个部分:
 
-1. **Accessibility Tree** — 页面的无障碍树结构 (前 50 行预览，完整内容保存到文件)
-2. **可交互元素** — 所有 input、select、button、textarea、a 标签，每个元素显示: tag、CSS selector 候选列表 (★ 唯一 / ○ 非唯一)、id、name、type、text、href、aria-label
-3. **映射表** — Accessibility Tree 节点与 DOM 元素的对应关系，每个节点列出 ★/○ 标记的选择器候选列表和唯一性验证结果
-4. **STEPS 建议** — 根据映射结果自动生成关键元素的 STEPS 配置提示
-5. **页面截图** — 保存页面截图用于确认结构
+1. **可交互元素** — 所有 input、select、button、textarea、a 标签，每个元素显示选择器候选列表 (★ 唯一 / ○ 非唯一)、属性信息 (id, name, placeholder, href, aria-label, text)
+2. **STEPS 建议** — 自动提取关键元素（输入框、搜索按钮）的 selector/match 提示 + STEPS 模板
+3. **页面截图** — 保存截图用于确认页面结构
 
-所有输出同时**保存到本地文件**（`OUTPUT_DIR` 目录下），方便离线查阅:
+输出保存到 `OUTPUT_DIR` 目录:
 
 | 文件 | 内容 | 格式 |
 |---|---|---|
-| `discovery_accessibility_tree.txt` | 完整 Accessibility Tree (无截断) | 文本 |
-| `discovery_elements.json` | 所有可交互 DOM 元素数据 (含 selector_candidates) | JSON |
-| `discovery_mapping.json` | Accessibility→DOM 映射数据 | JSON |
-| `discovery_mapping_table.txt` | 映射表可读版本 (★/○ 唯一性标记) | 文本 |
+| `discovery_elements.json` | 可交互元素数据 (含选择器唯一性验证) | JSON |
 | `discovery_screenshot.png` | 页面截图 | 图片 |
 
-根据输出，你可以找到输入框、搜索按钮、结果链接的 CSS 选择器，填入 STEPS 步骤序列中。
+### 5.1.1 DevTools 定位方式 (推荐)⭐️
 
-**使用流程:**
+比 discover 更快的方法是**直接在 Chrome DevTools 中检查目标元素**，30 秒就能拿到选择器:
 
+1. 在目标网页上 **右键点击** 要定位的元素 → 选择 **"检查"**
+2. 在 DevTools Elements 面板中读取元素的 `id`, `class`, `href`, `aria-label`, `name`, `placeholder`
+3. 右键 HTML 代码 → **Copy → Copy selector** → 粘贴到 config.yaml
+4. 在 Console 中验证唯一性: `document.querySelectorAll('选择器').length`
+
+示例:
+
+```yaml
+# 从 DevTools 中看到 <input id="golbalSearch" placeholder="搜索项目">
+- action: fill
+  selector: "#golbalSearch"
+  content: "OpenHarmony"
+
+# 或者用 match 方式:
+- action: fill
+  match: placeholder
+  value: "搜索项目"
+  content: "OpenHarmony"
+
+# 从 DevTools 中看到 <button class="search-btn">搜索</button>
+- action: click
+  match: text
+  value: "搜索"
+
+# 从 DevTools 中看到 <a href="/openharmony/kernel">
+- action: click
+  match: href
+  value: "/openharmony/kernel"
 ```
-1. 在 config.yaml 中填写 CLI_PATH (TARGET_URL 可留空, 用 --url 替代)
-2. 运行 python3 main.py --mode discover [--url "目标网址"]
-3. 查看 OUTPUT_DIR 下的输出文件 (或直接看终端输出)
-4. 根据映射表和选择器候选列表编写 STEPS 步骤序列 (详见第 6 章)
-5. 运行 python3 main.py --mode auto 开始下载
-```
+
+DevTools 定位方式的优势:
+
+| 方面 | DevTools | discover 模式 |
+|---|---|---|
+| 定位精度 | 直达目标元素 | 批量输出，需自行筛选 |
+| 操作耗时 | 30 秒 | 需运行命令 + 等待 |
+| 适用范围 | 任何元素 | 仅覆盖标准交互元素 |
+
+详细的 DevTools 定位操作指南（包括自定义属性 `ng-click`、动态元素、表格单元格、深层嵌套等），请参见 **[Chrome DevTools 元素定位指南](docs/devtools-guide.md)**。
 
 ### 5.2 Auto 模式：自动下载
 
@@ -384,7 +408,7 @@ STEPS:
 | `wait` | 等待条件 (5 种策略) | `strategy`, `value/selector/expr`, `timeout` |
 | `evaluate` | 执行 JS 表达式 | `expr`, `save_to?: 变量名` |
 | `extract` | 提取下载链接 | `strategy: css/js/semantic/auto`, `selector/expr` |
-| `loop` | 循环检查直到条件满足 | `condition`, `expr/selector/value`, `max_iterations`, `interval`, `on_timeout` |
+| `loop` | 循环检查直到条件满足, 支持每轮执行子步骤 (`each`) | `condition`, `expr/selector/value`, `each?`, `max_iterations`, `interval`, `on_timeout` |
 | `branch` | 条件分支跳转 (if-elif-else) | `branches`: [{if:JS, then:目标}, {elif:JS, then:目标}, {else:目标}] |
 | `screenshot` | 截图 | `output?: 路径` |
 | `snapshot` | 获取 Accessibility Tree | `format?: "text"/"json"`, `save_to?` |
@@ -463,7 +487,7 @@ chrome-auto-fetch 通过「选择器」定位页面上的元素 (输入框、按
 
 ### 7.1 方式一: CSS 选择器 (`selector`)
 
-最常见的定位方式, 使用标准 CSS 选择器语法直接匹配 DOM 元素。
+最常见的定位方式, 使用标准 CSS 选择器语法直接匹配 DOM 元素。**不熟悉 CSS 选择器的用户, 请先阅读 [选择器入门指南](docs/selector-guide.md)。**
 
 ```yaml
 - action: click
